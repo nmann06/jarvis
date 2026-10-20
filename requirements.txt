@@ -6,6 +6,7 @@ numpy==2.5.4
 nvidia-cublas-cu12==12.9.2.10
 nvidia-cudnn-cu12==9.27.0.42
 piper-tts==1.8.0
+psutil==7.2.2
 python-dotenv==1.2.4
 requests==2.34.2
 scikit-learn==1.9.1
