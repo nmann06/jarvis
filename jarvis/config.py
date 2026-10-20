@@ -16,7 +16,7 @@ def _device(value):
     return int(value) if value.isdigit() else value
 
 
-PIPER_VOICE = Path(os.getenv("PIPER_VOICE", ROOT / "models/piper/en_GB-alan-medium.onnx"))
+PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
 OUTPUT_DEVICE = _device(os.getenv("OUTPUT_DEVICE", ""))
