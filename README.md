@@ -28,6 +28,7 @@ Whisper models download to `~/.cache/huggingface` on first use.
 .venv/bin/python -m jarvis.tts "Good evening, sir."        # speaks aloud
 .venv/bin/python -m jarvis.stt 5                           # records 5 s, prints the transcript
 .venv/bin/python -m tests.bench_stt                        # compares Whisper models (add @cpu to run one on CPU)
+.venv/bin/python -m jarvis.wakeword                        # prints WAKE + what you said, Ctrl+C to stop
 ```
 
 ## Settings (`.env`)
@@ -40,6 +41,8 @@ Whisper models download to `~/.cache/huggingface` on first use.
 | `WHISPER_DEVICE` | `cuda` | `cpu` uses int8 and `WHISPER_THREADS` |
 | `PIPER_VOICE` | `models/piper/en_GB-alan-medium.onnx` | |
 | `TTS_LENGTH_SCALE`, `TTS_VOLUME` | `1.0` | Speech speed (>1 is slower) and loudness |
+| `WAKE_THRESHOLD` | `0.5` | Raise if it wakes by itself, lower if it misses you |
+| `SILENCE_SECONDS` | `0.8` | Pause that ends what you're saying |
 | `INPUT_DEVICE`, `OUTPUT_DEVICE` | system default | Index or name substring; list with `python -m sounddevice` |
 
 ## Measured on this machine
@@ -49,11 +52,13 @@ Whisper models download to `~/.cache/huggingface` on first use.
 
 ## Status
 
-Done: TTS, STT (GPU), Claude connection. Next: wake word + end-of-speech detection, then the
+Done: TTS, STT (GPU), Claude connection, wake word + end-of-speech detection. Next: the
 full pipeline, tools, and a systemd service.
 
 ## Notes
 
+- openWakeWord 0.6.0 is installed with `--no-deps`: it lists `tflite-runtime`, which has no
+  Python 3.12 build, but Jarvis runs it on ONNX instead.
 - `av` is pinned to 18.1.0: av 19 breaks faster-whisper 1.2.1.
 - The NVIDIA driver is the DKMS `nvidia-driver-595-open`, signed with the enrolled MOK key, so it
   works with Secure Boot on. cuBLAS/cuDNN come from pip and are loaded by `jarvis/stt.py`.

@@ -25,5 +25,9 @@ TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")  # "cuda" or "cpu"
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
+WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))  # 0-1; higher = fewer false wakes
+SPEECH_THRESHOLD = float(os.getenv("SPEECH_THRESHOLD", "0.5"))  # Silero VAD speech probability
+SILENCE_SECONDS = float(os.getenv("SILENCE_SECONDS", "0.8"))  # pause that ends an utterance
+MAX_UTTERANCE_SECONDS = float(os.getenv("MAX_UTTERANCE_SECONDS", "15"))
 OUTPUT_DEVICE =_device(os.getenv("OUTPUT_DEVICE", ""))
 INPUT_DEVICE = _device(os.getenv("INPUT_DEVICE", ""))
