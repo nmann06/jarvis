@@ -1,3 +1,4 @@
+anthropic==1.17.0
 av==18.1.0
 ctranslate2==4.8.3
 faster-whisper==1.2.1
