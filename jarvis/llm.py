@@ -9,27 +9,34 @@ from collections import deque
 
 import anthropic
 
-from jarvis import config, tools
+from jarvis import config, notify, tools
 
 log = logging.getLogger(__name__)
 
-SYSTEM = """You are Jarvis, a voice assistant running on a laptop in your owner's home in \
+SYSTEM = """You are Jarvis, a personal assistant running on a laptop in your owner's home in \
 Kingston, Ontario. Your owner is an electrical engineering student.
 
-Everything you write is converted to speech, so:
-- Reply in one or two short spoken sentences unless asked for more.
-- Plain words only: no markdown, lists, emoji, URLs or symbols. Write numbers and units the way \
-you would say them, e.g. "nine degrees" not "9°C", "half past seven" not "19:30".
+{style}
 
 Personality: calm, capable, dry British wit. Address the owner as "sir" now and then, not in \
 every reply.
 
 Use your tools for the time, date, weather, timers, notes and this computer's status rather than \
 guessing. If something can't be done with your tools, say so briefly. Your earlier replies in \
-this conversation already used tools where needed, so trust them. The transcript comes from \
-speech recognition and may contain misheard words; go with the most likely meaning. If no tool \
-can do what was asked, say so instead of guessing. Do not include internal or system XML tags in \
-your response."""
+this conversation already used tools where needed, so trust them. If no tool can do what was \
+asked, say so instead of guessing. Do not include internal or system XML tags in your response."""
+
+STYLES = {
+    "voice": """You are speaking: everything you write is converted to speech, so:
+- Reply in one or two short spoken sentences unless asked for more.
+- Plain words only: no markdown, lists, emoji, URLs or symbols. Write numbers and units the way \
+you would say them, e.g. "nine degrees" not "9°C", "half past seven" not "19:30".
+- The words come from speech recognition and may contain misheard words; go with the most \
+likely meaning.""",
+    "discord": """You are chatting with the owner in Discord direct messages. Keep replies short \
+and conversational, like a text message. Light Discord markdown (bold, bullet lists) is fine \
+when it helps; no headings.""",
+}
 
 MAX_TOOL_ROUNDS = 5  # guard against a tool loop that never ends
 
@@ -47,13 +54,25 @@ def _thinking():
 
 
 class Brain:
-    def __init__(self):
+    """One conversation with Claude. channel ("voice" or "discord") sets the reply style and
+    where alerts from tools such as timers are delivered."""
+
+    def __init__(self, channel="voice"):
+        self.channel = channel
+        self._system = SYSTEM.format(style=STYLES[channel])
         self._client = anthropic.Anthropic()
         # Finished turns as plain (question, reply) text. Old thinking and tool blocks aren't
         # replayed, so trimming the oldest turn never invalidates anything still sent.
         self._history = deque(maxlen=config.HISTORY_TURNS)
 
     def ask(self, text, follow_up=False):
+        token = notify.channel.set(self.channel)
+        try:
+            return self._ask(text, follow_up)
+        finally:
+            notify.channel.reset(token)
+
+    def _ask(self, text, follow_up):
         """Send the owner's words to Claude, running any tools it calls. Returns the reply.
 
         follow_up means it was heard without the wake word; Claude may then decide it wasn't
@@ -70,7 +89,7 @@ class Brain:
 
         for _ in range(MAX_TOOL_ROUNDS):
             response = self._client.messages.create(
-                model=config.CLAUDE_MODEL, max_tokens=config.MAX_TOKENS, system=SYSTEM,
+                model=config.CLAUDE_MODEL, max_tokens=config.MAX_TOKENS, system=self._system,
                 tools=tools.SCHEMAS, messages=messages,
                 output_config={"effort": config.CLAUDE_EFFORT}, **_thinking())
             u = response.usage

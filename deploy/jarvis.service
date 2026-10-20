@@ -1,0 +1,15 @@
+[Unit]
+Description=Jarvis assistant (voice + Discord)
+# Needs the user's PipeWire session for the mic and speakers.
+After=pipewire.service pipewire-pulse.service wireplumber.service
+Wants=pipewire.service pipewire-pulse.service wireplumber.service
+
+[Service]
+WorkingDirectory=%h/jarvis
+ExecStart=%h/jarvis/.venv/bin/python -m jarvis.main
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

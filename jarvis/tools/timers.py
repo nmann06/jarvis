@@ -1,20 +1,18 @@
 import threading
 import time
 
+from jarvis import notify
 from jarvis.tools import tool
-
-# main.py points this at the speaker; until then alerts are printed.
-on_alert = print
 
 _timers = {}  # id -> (label, end time, threading.Timer)
 _next_id = 1
 _lock = threading.Lock()
 
 
-def _fire(timer_id):
+def _fire(timer_id, channel):
     with _lock:
         label, _, _ = _timers.pop(timer_id)
-    on_alert(f"Sir, your {label} timer is done." if label else "Sir, your timer is done.")
+    notify.send(channel, f"Sir, your {label} timer is done." if label else "Sir, your timer is done.")
 
 
 @tool("Start a countdown timer that announces itself when done. Several can run at once.",
@@ -24,7 +22,8 @@ def set_timer(seconds, label):
     global _next_id
     with _lock:
         timer_id, _next_id = _next_id, _next_id + 1
-        t = threading.Timer(seconds, _fire, args=(timer_id,))
+        # The alert goes back wherever the timer was set: spoken, or a Discord message.
+        t = threading.Timer(seconds, _fire, args=(timer_id, notify.channel.get()))
         t.daemon = True
         _timers[timer_id] = (label, time.monotonic() + seconds, t)
     t.start()

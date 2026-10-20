@@ -1,6 +1,7 @@
 anthropic==1.17.0
 av==18.1.0
 ctranslate2==4.8.3
+discord.py==2.7.1
 faster-whisper==1.2.1
 numpy==2.5.4
 nvidia-cublas-cu12==12.9.2.10

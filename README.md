@@ -24,13 +24,37 @@ Whisper models download to `~/.cache/huggingface` on first use.
 
 ## Run
 
+Jarvis runs as a systemd user service that starts on boot (lingering is on, so no login is
+needed) and restarts if it crashes. It runs the voice loop and, when `DISCORD_TOKEN` is set,
+the Discord bot; both share the same tools.
+
 ```
-.venv/bin/python -m jarvis.main      # say "Hey Jarvis", wait for the chime, then speak; Ctrl+C to stop
+systemctl --user status jarvis          # is it running?
+journalctl --user -u jarvis -f          # live logs, including per-turn latency
+systemctl --user restart jarvis         # after changing .env or code
+systemctl --user stop jarvis            # stop it (e.g. to run a test that needs the mic)
 ```
 
-After each reply it listens for 5 s for a follow-up without the wake word. Claude is told the
-follow-up came without the wake word and ignores it if it sounds like you're talking to someone
-else. A falling chime means it has gone back to waiting for "Hey Jarvis". Each turn logs the time taken by every stage.
+To run it in the foreground instead: stop the service, then `.venv/bin/python -m jarvis.main`.
+The unit file is `deploy/jarvis.service`, linked into `~/.config/systemd/user/`.
+
+Voice: say "Hey Jarvis", wait for the chime, then speak. After each reply it listens for 5 s for
+a follow-up without the wake word. Claude is told the follow-up came without the wake word and
+ignores it if it sounds like you're talking to someone else. A falling chime means it has gone
+back to waiting for "Hey Jarvis".
+
+Discord: DM the bot. It answers only `DISCORD_OWNER_ID`. Timers announce themselves where they
+were set (spoken or by DM).
+
+### Discord setup
+
+1. discord.com/developers/applications -> New Application -> Bot -> Reset Token; put it in `.env`
+   as `DISCORD_TOKEN`. On the same page, turn on **Message Content Intent**.
+2. OAuth2 -> URL Generator: scope `bot`; open the URL and add the bot to any server you're in
+   (needed so it can DM you).
+3. Discord settings -> Advanced -> Developer Mode on; right-click your name -> Copy User ID; put it
+   in `.env` as `DISCORD_OWNER_ID`.
+4. `systemctl --user restart jarvis`, then DM the bot.
 
 ## Checks
 
@@ -70,8 +94,8 @@ else. A falling chime means it has gone back to waiting for "Hey Jarvis". Each t
 
 ## Status
 
-Done: TTS, STT (GPU), Claude with tools, wake word + end-of-speech detection, full pipeline.
-Next: a systemd service.
+Done: TTS, STT (GPU), Claude with tools, wake word + end-of-speech detection, full pipeline,
+systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, OnQ, briefings.
 
 ## Tools
 

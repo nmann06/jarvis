@@ -22,6 +22,10 @@ CLAUDE_EFFORT = os.getenv("CLAUDE_EFFORT", "low")  # low/medium/high: more think
 CLAUDE_THINKING = os.getenv("CLAUDE_THINKING", "off") == "on"  # thinking before replying
 HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "10"))  # past exchanges sent with each request
 
+VOICE_ENABLED = os.getenv("VOICE_ENABLED", "on") == "on"
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
+DISCORD_OWNER_ID = int(os.getenv("DISCORD_OWNER_ID", "0"))  # the only user the bot answers
+
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
