@@ -5,7 +5,6 @@ faster-whisper==1.2.1
 numpy==2.5.4
 nvidia-cublas-cu12==12.9.2.10
 nvidia-cudnn-cu12==9.27.0.42
-openwakeword==0.6.0
 piper-tts==1.8.0
 python-dotenv==1.2.4
 requests==2.34.2

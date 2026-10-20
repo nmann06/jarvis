@@ -15,6 +15,7 @@ machine itself; only the text of what you say is sent to Claude.
 ```
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install --no-deps openwakeword==0.6.0   # see Notes
 cp .env.example .env && chmod 600 .env   # then put your ANTHROPIC_API_KEY in .env
 ```
 
