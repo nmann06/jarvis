@@ -33,6 +33,12 @@ your response."""
 
 MAX_TOOL_ROUNDS = 5  # guard against a tool loop that never ends
 
+IGNORE = "IGNORE"
+FOLLOW_UP_NOTE = f"""This was picked up in the few seconds after your last reply, without the wake \
+word, so it may not be meant for you: the owner could be talking to someone else in the room. \
+If it is clearly a follow-up to you or a request you can help with, answer it normally. If it \
+sounds like conversation with someone else, reply with exactly {IGNORE} and nothing else."""
+
 
 def _thinking():
     # Thinking makes replies noticeably slower; with it off, the prompt line about tools keeps
@@ -47,13 +53,20 @@ class Brain:
         # replayed, so trimming the oldest turn never invalidates anything still sent.
         self._history = deque(maxlen=config.HISTORY_TURNS)
 
-    def ask(self, text):
-        """Send the owner's words to Claude, running any tools it calls. Returns the reply."""
+    def ask(self, text, follow_up=False):
+        """Send the owner's words to Claude, running any tools it calls. Returns the reply.
+
+        follow_up means it was heard without the wake word; Claude may then decide it wasn't
+        meant for Jarvis, and ask returns None.
+        """
         messages = []
         for question, reply in self._history:
             messages += [{"role": "user", "content": question},
                          {"role": "assistant", "content": reply}]
         messages.append({"role": "user", "content": text})
+        if follow_up:
+            # A system message rather than text in the user turn, so it can't read as the owner's words.
+            messages.append({"role": "system", "content": FOLLOW_UP_NOTE})
 
         for _ in range(MAX_TOOL_ROUNDS):
             response = self._client.messages.create(
@@ -86,6 +99,8 @@ class Brain:
         else:
             reply = "Sorry sir, I got tangled up there."
 
+        if follow_up and reply.strip().rstrip(".").upper() == IGNORE:
+            return None  # not kept in history either
         reply = reply or "Done."
         self._history.append((text, reply))
         return reply

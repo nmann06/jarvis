@@ -40,7 +40,7 @@ def say(text):
         return tts.speak(text)
 
 
-def handle(mic, brain, utterance):
+def handle(mic, brain, utterance, follow_up=False):
     """Transcribe, ask Claude, speak. Returns False if there was nothing to answer."""
     t0 = time.perf_counter()
     text = stt.transcribe(utterance)
@@ -49,8 +49,11 @@ def handle(mic, brain, utterance):
         log.info("heard nothing intelligible (%.1fs of audio)", len(utterance) / audio.SAMPLE_RATE)
         return False
     log.info("you: %s", text)
-    reply = brain.ask(text)
+    reply = brain.ask(text, follow_up=follow_up)
     t2 = time.perf_counter()
+    if reply is None:
+        log.info("not meant for me, back to idle (claude %.2fs)", t2 - t1)
+        return False
     log.info("jarvis: %s", reply)
     synth = say(reply)
     # Recording only stops after SILENCE_SECONDS of quiet, so that's part of the wait too.
@@ -73,9 +76,12 @@ def run():
             log.info("wake (score %.2f)", score)
             play(CHIME)
             utterance = audio.record_utterance(mic, preroll=wake.preroll)
+            follow_up = False
             # Follow-up window: after a reply, listen again without needing the wake word.
-            while utterance is not None and handle(mic, brain, utterance):
+            # Claude decides whether what it hears there was meant for Jarvis.
+            while utterance is not None and handle(mic, brain, utterance, follow_up):
                 utterance = audio.record_utterance(mic, wait_seconds=config.FOLLOW_UP_SECONDS)
+                follow_up = True
             play(END_CHIME)
             mic.clear()
 

@@ -28,8 +28,9 @@ Whisper models download to `~/.cache/huggingface` on first use.
 .venv/bin/python -m jarvis.main      # say "Hey Jarvis", wait for the chime, then speak; Ctrl+C to stop
 ```
 
-After each reply it listens for 5 s for a follow-up without the wake word; a falling chime
-means it has gone back to waiting for "Hey Jarvis". Each turn logs the time taken by every stage.
+After each reply it listens for 5 s for a follow-up without the wake word. Claude is told the
+follow-up came without the wake word and ignores it if it sounds like you're talking to someone
+else. A falling chime means it has gone back to waiting for "Hey Jarvis". Each turn logs the time taken by every stage.
 
 ## Checks
 
@@ -93,6 +94,8 @@ then add the module to the import line at the bottom of `jarvis/tools/__init__.p
 
 - openWakeWord 0.6.0 is installed with `--no-deps`: it lists `tflite-runtime`, which has no
   Python 3.12 build, but Jarvis runs it on ONNX instead.
+- Conversation memory (last `HISTORY_TURNS` exchanges) lasts until Jarvis restarts; notes are
+  saved to disk.
 - `av` is pinned to 18.1.0: av 19 breaks faster-whisper 1.2.1.
 - The NVIDIA driver is the DKMS `nvidia-driver-595-open`, signed with the enrolled MOK key, so it
   works with Secure Boot on. cuBLAS/cuDNN come from pip and are loaded by `jarvis/stt.py`.
