@@ -1,7 +1,6 @@
 """Microphone streaming and end-of-speech detection."""
 
 import queue
-import time
 
 import numpy as np
 import sounddevice as sd
@@ -57,31 +56,33 @@ def speech_probability(window):
     return float(_vad(frames).max())
 
 
-def record_utterance(mic, wait_seconds=5.0):
+def record_utterance(mic, wait_seconds=5.0, preroll=()):
     """Record from mic until the speaker stops. Returns float32 audio, or None if nobody spoke.
 
     wait_seconds is how long to wait for speech to start; after that, recording ends once
-    there has been SILENCE_SECONDS of quiet, or at MAX_UTTERANCE_SECONDS.
+    there has been SILENCE_SECONDS of quiet, or at MAX_UTTERANCE_SECONDS. preroll blocks
+    (already heard) go at the front of the recording.
     """
-    blocks, started, quiet = [], False, 0.0
-    start = time.monotonic()
+    # Only new blocks are judged, so the tail of "Jarvis" in the preroll can't count as the
+    # request starting. Time is counted in blocks rather than by the clock.
+    preroll = list(preroll)
+    new, started, quiet = [], False, 0.0
     block_seconds = BLOCK / SAMPLE_RATE
     while True:
-        blocks.append(mic.read())
-        tail = np.concatenate(blocks[-2:])
-        if len(tail) < VAD_WINDOW:
+        new.append(mic.read())
+        if len(new) < 2:
             continue
-        p = speech_probability(tail)
+        p = speech_probability(np.concatenate(new[-2:]))
         if not started:
             if p >= config.SPEECH_THRESHOLD:
                 started = True
-            elif time.monotonic() - start > wait_seconds:
+            elif len(new) * block_seconds > wait_seconds:
                 return None
         else:
             # Silero dips between words, so only a sustained low score counts as the end.
             quiet = quiet + block_seconds if p < config.SPEECH_THRESHOLD * 0.7 else 0.0
             if quiet >= config.SILENCE_SECONDS:
                 break
-        if len(blocks) * block_seconds >= config.MAX_UTTERANCE_SECONDS:
+        if len(new) * block_seconds >= config.MAX_UTTERANCE_SECONDS:
             break
-    return np.concatenate(blocks).astype(np.float32) / 32768
+    return np.concatenate(preroll + new).astype(np.float32) / 32768
