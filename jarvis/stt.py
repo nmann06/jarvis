@@ -25,8 +25,9 @@ def get_model():
 
 def transcribe(audio):
     """Transcribe float32 mono 16 kHz samples (or a path to an audio file) to text."""
+    # vad_filter skips non-speech audio first; otherwise Whisper invents words like "You" on silence.
     segments, _ = get_model().transcribe(audio, language="en", beam_size=1,
-                                         vad_filter=False, condition_on_previous_text=False)
+                                         vad_filter=True, condition_on_previous_text=False)
     return " ".join(s.text.strip() for s in segments).strip()
 
 
