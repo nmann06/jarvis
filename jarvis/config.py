@@ -19,5 +19,7 @@ def _device(value):
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
-OUTPUT_DEVICE = _device(os.getenv("OUTPUT_DEVICE", ""))
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base.en")
+WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
+OUTPUT_DEVICE =_device(os.getenv("OUTPUT_DEVICE", ""))
 INPUT_DEVICE = _device(os.getenv("INPUT_DEVICE", ""))
