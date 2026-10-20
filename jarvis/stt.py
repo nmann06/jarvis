@@ -1,7 +1,9 @@
 """Speech-to-text with faster-whisper. Run: python -m jarvis.stt [seconds] to record from the mic and transcribe."""
 
+import ctypes
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
@@ -14,12 +16,31 @@ SAMPLE_RATE = 16000  # what Whisper expects
 _model = None
 
 
+def _load_cuda_libs():
+    # cuBLAS/cuDNN come from the nvidia-*-cu12 pip packages, which aren't on the loader path,
+    # so load them by full path before CTranslate2 looks for them.
+    try:
+        import nvidia.cublas, nvidia.cudnn
+    except ImportError:
+        return
+    for pkg, names in ((nvidia.cublas, ["libcublasLt.so.12", "libcublas.so.12"]),
+                       (nvidia.cudnn, ["libcudnn*.so.9"])):
+        lib_dir = Path(pkg.__path__[0]) / "lib"
+        for pattern in names:
+            for lib in sorted(lib_dir.glob(pattern)):
+                ctypes.CDLL(str(lib), mode=ctypes.RTLD_GLOBAL)
+
+
 def get_model():
     # First use downloads the model to ~/.cache/huggingface, then it loads from disk.
     global _model
     if _model is None:
-        _model = WhisperModel(config.WHISPER_MODEL, device="cpu", compute_type="int8",
-                              cpu_threads=config.WHISPER_THREADS)
+        if config.WHISPER_DEVICE == "cuda":
+            _load_cuda_libs()
+            _model = WhisperModel(config.WHISPER_MODEL, device="cuda", compute_type="float16")
+        else:
+            _model = WhisperModel(config.WHISPER_MODEL, device="cpu", compute_type="int8",
+                                  cpu_threads=config.WHISPER_THREADS)
     return _model
 
 

@@ -1,6 +1,6 @@
 """Benchmark Whisper models on clips with known text.
 
-Usage: python -m tests.bench_stt [models...] [--clip file.wav "expected text"]
+Usage: python -m tests.bench_stt [models...]  (append @cpu to run a model on the CPU) [--clip file.wav "expected text"]
 Without --clip, test clips are generated with the Piper voice.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from faster_whisper import WhisperModel
 
-from jarvis import config, tts
+from jarvis import config, stt, tts
 
 SENTENCES = [
     "What time is it?",
@@ -65,15 +65,20 @@ def main():
         path, text = Path(args[i + 1]), args[i + 2]
         clips = [(path, text, clip_seconds(path))]
         del args[i:i + 3]
-    models = args or ["tiny.en", "base.en"]
+    models = args or ["base.en@cpu", "large-v3-turbo"]
 
     with tempfile.TemporaryDirectory() as tmp:
         clips = clips or make_clips(tmp)
         total_audio = sum(c[2] for c in clips)
         for name in models:
             t0 = time.perf_counter()
-            model = WhisperModel(name, device="cpu", compute_type="int8",
-                                 cpu_threads=config.WHISPER_THREADS)
+            if name.endswith("@cpu"):
+                name = name[:-4]
+                model = WhisperModel(name, device="cpu", compute_type="int8",
+                                     cpu_threads=config.WHISPER_THREADS)
+            else:
+                stt._load_cuda_libs()
+                model = WhisperModel(name, device="cuda", compute_type="float16")
             load = time.perf_counter() - t0
             model.transcribe(str(clips[0][0]), language="en")  # warm-up
             elapsed, errors = 0.0, 0.0
