@@ -22,6 +22,15 @@ cp .env.example .env && chmod 600 .env   # then put your ANTHROPIC_API_KEY in .e
 The Piper voice goes in `models/piper/` (`en_GB-alan-medium.onnx` plus its `.onnx.json`).
 Whisper models download to `~/.cache/huggingface` on first use.
 
+## Run
+
+```
+.venv/bin/python -m jarvis.main      # say "Hey Jarvis", wait for the chime, then speak; Ctrl+C to stop
+```
+
+After each reply it listens for 5 s for a follow-up without the wake word; a falling chime
+means it has gone back to waiting for "Hey Jarvis". Each turn logs the time taken by every stage.
+
 ## Checks
 
 ```
@@ -29,6 +38,7 @@ Whisper models download to `~/.cache/huggingface` on first use.
 .venv/bin/python -m jarvis.tts "Good evening, sir."        # speaks aloud
 .venv/bin/python -m jarvis.stt 5                           # records 5 s, prints the transcript
 .venv/bin/python -m tests.bench_stt                        # compares Whisper models (add @cpu to run one on CPU)
+.venv/bin/python -m jarvis.llm "What time is it?"       # ask Claude by text, with tools
 .venv/bin/python -m jarvis.wakeword                        # prints WAKE + what you said, Ctrl+C to stop
 ```
 
@@ -37,24 +47,47 @@ Whisper models download to `~/.cache/huggingface` on first use.
 | Setting | Default | Notes |
 |---|---|---|
 | `CLAUDE_MODEL` | `claude-haiku-5-5` | Any current Claude model id |
-| `MAX_TOKENS` | `300` | Caps reply length and cost |
+| `MAX_TOKENS` | `300` | Caps reply length and cost (raise to ~1024 if thinking is on) |
+| `CLAUDE_THINKING` | `off` | `on` lets Claude think first: slower, rarely better for this |
+| `CLAUDE_EFFORT` | `low` | `low` / `medium` / `high` |
+| `HISTORY_TURNS` | `10` | Past exchanges sent with each request |
 | `WHISPER_MODEL` | `large-v3-turbo` | `tiny.en` / `base.en` / `small.en` for CPU |
 | `WHISPER_DEVICE` | `cuda` | `cpu` uses int8 and `WHISPER_THREADS` |
 | `PIPER_VOICE` | `models/piper/en_GB-alan-medium.onnx` | |
 | `TTS_LENGTH_SCALE`, `TTS_VOLUME` | `1.0` | Speech speed (>1 is slower) and loudness |
 | `WAKE_THRESHOLD` | `0.5` | Raise if it wakes by itself, lower if it misses you |
 | `SILENCE_SECONDS` | `0.8` | Pause that ends what you're saying |
+| `FOLLOW_UP_SECONDS` | `5` | How long it listens for a follow-up after replying |
 | `INPUT_DEVICE`, `OUTPUT_DEVICE` | system default | Index or name substring; list with `python -m sounddevice` |
 
 ## Measured on this machine
 
 - Whisper `large-v3-turbo` on GPU: 0.15 s per second of audio (CPU `base.en`: 0.24 s, and less accurate).
-- Claude `claude-haiku-5-5`, five-word reply: about 0.9 s.
+- Claude `claude-haiku-5-5`: about 0.9 s per request; a question needing a tool takes two (1.5-2 s).
+- Piper: about 0.13 s to synthesize a one-sentence reply.
+- End of speech to Jarvis's voice (simulated audio): 2.7-3.3 s, of which 0.8 s is the silence wait.
 
 ## Status
 
-Done: TTS, STT (GPU), Claude connection, wake word + end-of-speech detection. Next: the
-full pipeline, tools, and a systemd service.
+Done: TTS, STT (GPU), Claude with tools, wake word + end-of-speech detection, full pipeline.
+Next: a systemd service.
+
+## Tools
+
+Claude can call: `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `read_notes`
+(`data/notes.md`), `get_weather` (Kingston, Open-Meteo), `system_status`.
+
+To add one, write a function in a module under `jarvis/tools/` and decorate it:
+
+```python
+from jarvis.tools import tool
+
+@tool("What it does, for Claude.", city={"type": "string", "description": "City name"})
+def my_tool(city):
+    return "result text (or a dict, sent as JSON)"
+```
+
+then add the module to the import line at the bottom of `jarvis/tools/__init__.py`.
 
 ## Notes
 
