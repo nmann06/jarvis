@@ -5,7 +5,8 @@
   before; assignments, labs and other due work 2 days and 1 day before;
 - OnQ reminders: assignments not yet submitted and OnQ quizzes, 2 days and 1 day before
   (OnQ calendar events are left out: tests go in the Midterms calendar instead);
-- important-email alerts: new unread mail that Claude judges worth a ping.
+- important-email alerts: new unread mail that Claude judges worth a ping;
+- power alerts: the laptop went on battery, is running low, or was plugged back in.
 
 What was already sent is kept in data/proactive.json, so a restart doesn't repeat anything.
 Reminders that would land after 10 pm (work due at 11:59 PM) go out at 10 pm instead.
@@ -18,6 +19,7 @@ import re
 import threading
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import anthropic
 
@@ -45,6 +47,8 @@ REMIND_BEFORE = {
     "test": [timedelta(days=4), timedelta(days=2), timedelta(days=1), timedelta(hours=2)],
     "work": [timedelta(days=2), timedelta(days=1)],
 }
+POWER_SUPPLIES = Path("/sys/class/power_supply")
+BATTERY_WARN_AT = [20, 10]  # percent
 ALL_DAY_TIME = 9  # an all-day deadline counts as due at 9 am for reminders
 LATEST_REMINDER_HOUR = 22  # a reminder that would go out later (e.g. for 11:59 PM work) goes at 10 pm
 
@@ -233,6 +237,40 @@ def check_email(state, now):
     state["emails_seen"] = (list(seen | {e["id"] for e in emails}))[-500:]
 
 
+# --- power ---------------------------------------------------------------------------------
+
+def power():
+    """(on mains power?, battery percent or None), from the kernel's power supply info."""
+    plugged, percent = None, None
+    for supply in POWER_SUPPLIES.iterdir():
+        kind = (supply / "type").read_text().strip()
+        if kind == "Mains":
+            plugged = (supply / "online").read_text().strip() == "1"
+        elif kind == "Battery" and (supply / "capacity").exists():
+            percent = int((supply / "capacity").read_text())
+    return plugged, percent
+
+
+def check_power(state, now):
+    plugged, percent = power()
+    if plugged is None:
+        return  # no mains adapter reported
+    was = state.get("power")
+    if plugged:
+        if was == "battery":
+            notify.post(f"🔌 The laptop is plugged in again (battery {percent}%).")
+        state["power"], state["battery_warned"] = "ac", []
+        return
+    if was != "battery":
+        notify.post(f"🔋 The laptop is on battery ({percent}%). Jarvis keeps running, but plug it in "
+                    "before it runs out.")
+    warned = set(state.get("battery_warned", []))
+    due = [w for w in BATTERY_WARN_AT if percent is not None and percent <= w and w not in warned]
+    if due and was == "battery":
+        notify.post(f"🪫 Battery is at {percent}%. Jarvis stops when it runs out.")
+    state["power"], state["battery_warned"] = "battery", sorted(warned | set(due))
+
+
 # --- morning briefing ----------------------------------------------------------------------
 
 def _describe(event):
@@ -302,6 +340,7 @@ def run():
     while True:
         state, now = _load(), datetime.now(TZ)
         for name, check, every in (("briefing", check_briefing, 0),
+                                   ("power", check_power, 0),
                                    ("reminders", check_reminders, REMINDER_EVERY),
                                    ("onq", check_onq, ONQ_EVERY),
                                    ("email", check_email, EMAIL_EVERY)):
