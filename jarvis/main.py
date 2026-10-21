@@ -38,7 +38,8 @@ def main():
     if config.DISCORD_TOKEN and not config.DISCORD_OWNER_ID:
         raise SystemExit("DISCORD_TOKEN is set but DISCORD_OWNER_ID isn't")
     if config.DISCORD_TOKEN:
-        from jarvis import discord_bot
+        from jarvis import discord_bot, proactive
+        proactive.start()  # briefing, reminders and email alerts, once the bot is connected
         discord_bot.run()  # blocks
         os._exit(1)
     else:

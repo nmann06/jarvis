@@ -54,25 +54,33 @@ def _describe(start, end, title, location=""):
     return f"{title}, {when}" + (f", at {location}" if location else "")
 
 
-@tool("List calendar events from the owner's Apple Calendar, oldest first.",
-      start_date={"type": "string", "description": "First day, YYYY-MM-DD (local time)"},
-      days={"type": "integer", "minimum": 1, "maximum": 31, "description": "How many days to cover"})
-def get_events(start_date, days):
-    start = datetime.combine(date.fromisoformat(start_date), datetime.min.time(), TZ)
-    end = start + timedelta(days=days)
-    events = []
+def events(start, end):
+    """Events overlapping [start, end) on every calendar, oldest first, as dicts with the
+    start and end (datetimes, or dates for all-day events), title, calendar, location and uid."""
+    found = []
     with _lock:
         for name, cal in _get_calendars().items():
             for ev in cal.search(start=start, end=end, event=True, expand=True):
                 c = ev.icalendar_component
                 s = _local(c.decoded("dtstart"))
-                e = _local(c.decoded("dtend")) if "dtend" in c else s
-                events.append((s if isinstance(s, datetime) else datetime.combine(s, datetime.min.time(), TZ),
-                               {"title": str(c.get("summary", "(no title)")), "calendar": name,
-                                "when": _describe(s, e, "").removeprefix(", "),
-                                "location": str(c.get("location", "")) or None}))
-    events.sort(key=lambda pair: pair[0])
-    return [info for _, info in events] or "No events."
+                found.append({"start": s, "end": _local(c.decoded("dtend")) if "dtend" in c else s,
+                              "title": str(c.get("summary", "(no title)")), "calendar": name,
+                              "location": str(c.get("location", "")) or None,
+                              "uid": str(c.get("uid", ""))})
+    sort_key = lambda e: (e["start"] if isinstance(e["start"], datetime)
+                          else datetime.combine(e["start"], datetime.min.time(), TZ))
+    return sorted(found, key=sort_key)
+
+
+@tool("List calendar events from the owner's Apple Calendar, oldest first.",
+      start_date={"type": "string", "description": "First day, YYYY-MM-DD (local time)"},
+      days={"type": "integer", "minimum": 1, "maximum": 31, "description": "How many days to cover"})
+def get_events(start_date, days):
+    start = datetime.combine(date.fromisoformat(start_date), datetime.min.time(), TZ)
+    found = events(start, start + timedelta(days=days))
+    return [{"title": e["title"], "calendar": e["calendar"],
+             "when": _describe(e["start"], e["end"], "").removeprefix(", "),
+             "location": e["location"]} for e in found] or "No events."
 
 
 @tool("Add an event to the owner's Apple Calendar. Can't change or delete existing events. "
