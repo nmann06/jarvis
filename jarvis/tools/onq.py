@@ -124,10 +124,18 @@ def _refresh():
     log.info("OnQ session refreshed")
 
 
+def _warn():
+    """Ask for a new login in #jarvis, once until a session works again."""
+    global _warned
+    if not _warned:
+        _warned = True
+        notify.post("🔑 My OnQ login has expired. At the laptop, run "
+                    "`.venv/bin/python -m jarvis.tools.onq login` in ~/jarvis.")
+
+
 def _get(path, raw=False, **params):
     """GET an API path (JSON, or the response itself if raw), renewing the session once if it
     has expired."""
-    global _warned
     with _lock:
         if not _http.cookies:
             _use(_stored())
@@ -136,10 +144,7 @@ def _get(path, raw=False, **params):
                 try:
                     _refresh()
                 except LoginNeeded:
-                    if not _warned:
-                        _warned = True
-                        notify.post("🔑 My OnQ login has expired. At the laptop, run "
-                                    "`.venv/bin/python -m jarvis.tools.onq login` in ~/jarvis.")
+                    _warn()
                     raise
             r = _http.get(HOST + path, params=params, timeout=20, allow_redirects=False)
             if r.status_code in (401, 403) or r.is_redirect:
@@ -154,6 +159,7 @@ def _get(path, raw=False, **params):
                            "sameSite": "Lax"} for c in r.cookies])
             r.raise_for_status()
             return r if raw else r.json()
+    _warn()
     raise LoginNeeded("OnQ refused the renewed session")
 
 
