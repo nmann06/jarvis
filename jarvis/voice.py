@@ -38,9 +38,18 @@ def play(samples, rate=48000):
         sd.wait()
 
 
+_alert_until = 0.0  # perf_counter time until which a wake is Jarvis hearing its own alert
+
+
 def say(text):
+    """Speak an alert (timer, Claude Code finished) from another thread."""
+    global _alert_until
     with _speaker:
-        return tts.speak(text)
+        _alert_until = float("inf")
+        try:
+            return tts.speak(text)
+        finally:
+            _alert_until = time.perf_counter() + 1.0  # the mic's audio lags the speaker a little
 
 
 # Ways of asking Jarvis to repeat itself, answered locally with the last reply word for word.
@@ -298,6 +307,10 @@ def run():
         log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)", config.WAKE_THRESHOLD)
         while True:
             score = wake.wait(mic)
+            if mic.captured < _alert_until:
+                # An alert can name the project "jarvis"; don't wake on it.
+                log.info("wake (score %.2f) during an alert: ignored", score)
+                continue
             log.info("wake (score %.2f)", score)
             # While the owner talks, get Claude's cache ready for the conversation so far.
             threading.Thread(target=brain.prewarm, name="prewarm", daemon=True).start()

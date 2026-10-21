@@ -32,6 +32,9 @@ if _owner and not _owner.isdigit():
 DISCORD_OWNER_ID = int(_owner or 0)  # the only user the bot answers
 DISCORD_CHANNEL = os.getenv("DISCORD_CHANNEL", "jarvis")  # answers everything here; alerts go here
 DISCORD_MENTION = os.getenv("DISCORD_MENTION", "on") == "on"  # @mention the owner in alerts
+# Socket other programs (the Claude Code hook) send alerts to; see jarvis/alerts.py.
+ALERT_SOCKET = Path(os.getenv("ALERT_SOCKET") or
+                    Path(os.getenv("XDG_RUNTIME_DIR") or "/tmp") / "jarvis.sock")
 
 ICLOUD_USER = os.getenv("ICLOUD_USER", "")  # Apple ID email
 ICLOUD_APP_PASSWORD = os.getenv("ICLOUD_APP_PASSWORD", "")  # app-specific password, not the real one

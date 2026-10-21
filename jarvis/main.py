@@ -33,6 +33,8 @@ def main():
     if not config.VOICE_ENABLED:
         from jarvis import tools
         tools.warm_up()  # the voice loop does this itself when it runs
+    from jarvis import alerts
+    alerts.start()  # e.g. "Claude has finished": spoken, or posted if voice is off
     if config.VOICE_ENABLED:
         threading.Thread(target=_voice, name="voice", daemon=True).start()
     if config.DISCORD_TOKEN and not config.DISCORD_OWNER_ID:

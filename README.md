@@ -139,6 +139,29 @@ the login command in #jarvis. Quick check: `.venv/bin/python -m jarvis.tools.onq
    in `.env` as `DISCORD_OWNER_ID`.
 4. `systemctl --user restart jarvis`, then DM the bot.
 
+### Claude Code alerts
+
+Jarvis says when a Claude Code session on this laptop is done ("Sir, Claude has finished in
+jarvis.") or needs you to check something: a permission, a question, or a plan to approve. Only
+things more than 30 s after your last message to that session are said
+(`JARVIS_CLAUDE_MIN_SECONDS`), since before that you're probably still watching. It goes through
+a socket Jarvis listens on (`$XDG_RUNTIME_DIR/jarvis.sock`, `jarvis/alerts.py`), spoken, or
+posted in #jarvis if voice is off. Any program can send it `{"text": "..."}` on one line.
+
+The hook is `deploy/claude-hook.py`, set up in `~/.claude/settings.json` for all sessions
+(`|| true` so a missing script can never hold Claude up):
+
+```json
+"hooks": {
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 ~/jarvis/deploy/claude-hook.py || true"}]}],
+  "Stop": [{"hooks": [{"type": "command", "command": "python3 ~/jarvis/deploy/claude-hook.py || true"}]}],
+  "Notification": [{"matcher": "permission_prompt|elicitation_dialog",
+                    "hooks": [{"type": "command", "command": "python3 ~/jarvis/deploy/claude-hook.py || true"}]}],
+  "PreToolUse": [{"matcher": "AskUserQuestion|ExitPlanMode",
+                  "hooks": [{"type": "command", "command": "python3 ~/jarvis/deploy/claude-hook.py || true"}]}]
+}
+```
+
 ## Checks
 
 ```
