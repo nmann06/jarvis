@@ -57,9 +57,24 @@ _REPEAT = re.compile(_FILLER + r"(?:"
                      r")" + r"(?: please| jarvis)*")
 
 
+def _words(text):
+    return " ".join(re.sub(r"[^a-z ]+", " ", text.lower().replace("'", " ")).split())
+
+
 def is_repeat_request(text):
-    words = re.sub(r"[^a-z ]+", " ", text.lower().replace("'", " ")).split()
-    return bool(_REPEAT.fullmatch(" ".join(words)))
+    return bool(_REPEAT.fullmatch(_words(text)))
+
+
+# Picking up a reply that was cut off with "stop". Like repeat requests, the whole utterance
+# must match, so "continue the story" still goes to Claude.
+_CONTINUE = re.compile(_FILLER + r"(?:continue|keep going|go on|carry on|resume|"
+                       r"finish (?:that|what you were saying)|where were you)"
+                       r"(?: talking| speaking| where you left off| from there)?"
+                       r"(?: please| jarvis)*")
+
+
+def is_continue_request(text):
+    return bool(_CONTINUE.fullmatch(_words(text)))
 
 
 class _Sentences:
@@ -68,6 +83,7 @@ class _Sentences:
 
     def __init__(self):
         self._queue, self._buffer, self.spoken = queue.Queue(), "", []
+        self.done = threading.Event()  # set once Claude has finished and spoken is complete
 
     def add(self, text):
         self._buffer += text
@@ -78,6 +94,7 @@ class _Sentences:
     def close(self):
         self._put(self._buffer)
         self._queue.put(None)
+        self.done.set()
 
     def _put(self, sentence):
         sentence = sentence.strip()
@@ -148,10 +165,14 @@ def _listen_for_stop(mic, stop, done, saying):
                 w.writeframes(np.concatenate(heard).tobytes())
 
 
+_unfinished = None  # (texts, index of the sentence cut off) after "stop", for "continue"
+
+
 def _speak(mic, texts, thinking=False):
     """Speak texts (a list, or _Sentences still streaming in), stopping if the owner says stop.
     thinking plays the thinking sound while waiting on texts. Returns (time speech started or
-    None, whether it was stopped)."""
+    None, whether it was stopped). When stopped, remembers where, so "continue" can resume."""
+    global _unfinished
     stop, done = threading.Event(), threading.Event()
     saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
               else (lambda: " ".join(texts)))
@@ -159,7 +180,11 @@ def _speak(mic, texts, thinking=False):
                                 name="stop", daemon=True)
     listener.start()
     try:
-        return tts.speak_all(texts, stop=stop, thinking=thinking), stop.is_set()
+        played = []
+        first = tts.speak_all(texts, stop=stop, thinking=thinking, played=played)
+        if stop.is_set():
+            _unfinished = (texts, max(len(played) - 1, 0))
+        return first, stop.is_set()
     finally:
         done.set()
         listener.join()
@@ -168,9 +193,30 @@ def _speak(mic, texts, thinking=False):
 _last_reply = None
 
 
+def _continue(mic):
+    """Say the rest of a reply that was cut off, from the start of the sentence it stopped in."""
+    global _last_reply, _unfinished
+    texts, start = _unfinished
+    _unfinished = None
+    if isinstance(texts, _Sentences):
+        texts.done.wait(timeout=60)  # Claude may have still been writing when it was stopped
+        texts = texts.spoken
+    rest = texts[start:]
+    log.info("continuing: %s", " ".join(rest))
+    with _speaker:
+        _, stopped = _speak(mic, rest)
+    if stopped:  # _speak remembered the new place within rest; make it within the whole reply
+        _unfinished = (texts, start + _unfinished[1])
+        mic.clear()
+        return False
+    _last_reply = " ".join(texts)
+    mic.clear()
+    return True
+
+
 def handle(mic, brain, utterance, follow_up=False):
     """Transcribe, ask Claude, speak. Returns False if there was nothing to answer."""
-    global _last_reply
+    global _last_reply, _unfinished
     t0 = time.perf_counter()
     text = stt.transcribe(utterance)
     t1 = time.perf_counter()
@@ -184,6 +230,9 @@ def handle(mic, brain, utterance, follow_up=False):
             _, stopped = _speak(mic, [_last_reply])
         mic.clear()
         return not stopped
+    if _unfinished and is_continue_request(text):
+        return _continue(mic)
+    _unfinished = None  # a new request: whatever was cut off before is dropped
     sentences, result = _Sentences(), {}
 
     def think():

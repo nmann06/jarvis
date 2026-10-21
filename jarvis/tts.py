@@ -52,13 +52,13 @@ def _thinking_sound(rate):
     return (loop * 0.06 * config.TTS_VOLUME * 32767).astype(np.int16)
 
 
-def speak_all(texts, stop=None, thinking=False):
+def speak_all(texts, stop=None, thinking=False, played=None):
     """Speak each piece of text as it arrives from texts (any iterable, e.g. sentences still
     being written by Claude), blocking until the last is played or the stop event is set.
     Piper works a sentence at a time, so one sentence plays while the next is synthesized.
     With thinking, a soft sound plays whenever it has been waiting on texts for a moment (Claude
-    thinking, a tool running). Returns the perf_counter time speech started, or None if nothing
-    was said."""
+    thinking, a tool running). If played is a list, each text is added to it as it starts
+    playing. Returns the perf_counter time speech started, or None if nothing was said."""
     voice = get_voice()
     syn = SynthesisConfig(length_scale=config.TTS_LENGTH_SCALE, volume=config.TTS_VOLUME)
     chunks = queue.Queue()
@@ -67,7 +67,7 @@ def speak_all(texts, stop=None, thinking=False):
         try:
             for text in texts:
                 for c in voice.synthesize(text, syn_config=syn):
-                    chunks.put(c.audio_int16_array)
+                    chunks.put((text, c.audio_int16_array))
         finally:
             chunks.put(None)
 
@@ -89,6 +89,9 @@ def speak_all(texts, stop=None, thinking=False):
                 continue
             if chunk is None:
                 break
+            text, chunk = chunk
+            if played is not None and (not played or played[-1] is not text):
+                played.append(text)
             hum_at = 0  # the next wait starts the sound from the top
             if first is None:
                 first = time.perf_counter()
