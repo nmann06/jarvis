@@ -8,7 +8,7 @@ machine itself; only the text of what you say is sent to Claude.
 | Speech-to-text | faster-whisper `large-v3-turbo` on the RTX 3060 (CUDA, float16) |
 | Text-to-speech | Piper, `en_GB-alan-medium` voice |
 | Brain | Claude via the `anthropic` SDK (`claude-haiku-5-5` by default) |
-| Microphone | Logitech Brio 101 webcam mic (the built-in mic is broken) |
+| Microphone | A USB webcam mic |
 
 ## Setup
 
@@ -58,7 +58,7 @@ in `ICLOUD_CALENDAR` (default Home) unless Claude picks a better fit (Work, Clas
 ### Google setup (Gmail, Sheets, Drive notes)
 
 Jarvis reads one Gmail inbox (forward your other accounts into it) and can save drafts, never
-send. It also reads and edits the job-search Google Sheet, and saves notes as Google Docs in a
+send. It also reads and edits one Google Sheet (`GOOGLE_SHEET_ID`), and saves notes as Google Docs in a
 "Jarvis Notes" Drive folder (it can only see files it created there).
 
 1. console.cloud.google.com -> create a project (e.g. "Jarvis").
@@ -142,7 +142,7 @@ systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, O
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
-(Google Docs in the Jarvis Notes Drive folder), `get_weather` (Kingston, Open-Meteo), `system_status`, OnQ (read-only):
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, OnQ (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
 `onq_announcements`, `onq_grades`, `onq_syllabus` (text cached in `data/onq-syllabi/`).
 
