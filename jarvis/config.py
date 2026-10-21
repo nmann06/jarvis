@@ -42,6 +42,8 @@ TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/autho
 TRELLO_BOARD = os.getenv("TRELLO_BOARD", "todo")  # main todo board
 
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
+# Small Vosk model that listens only for "stop"/"cancel" while Jarvis is talking.
+VOSK_MODEL = ROOT / os.getenv("VOSK_MODEL", "models/vosk-model-small-en-us-0.15")
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")

@@ -38,11 +38,11 @@ def speak(text):
     return first - start if first else 0.0
 
 
-def speak_all(texts):
+def speak_all(texts, stop=None):
     """Speak each piece of text as it arrives from texts (any iterable, e.g. sentences still
-    being written by Claude), blocking until the last is played. Piper works a sentence at a
-    time, so one sentence plays while the next is synthesized. Returns the perf_counter time
-    sound started, or None if there was nothing to say."""
+    being written by Claude), blocking until the last is played or the stop event is set.
+    Piper works a sentence at a time, so one sentence plays while the next is synthesized.
+    Returns the perf_counter time sound started, or None if nothing was said."""
     voice = get_voice()
     syn = SynthesisConfig(length_scale=config.TTS_LENGTH_SCALE, volume=config.TTS_VOLUME)
     chunks = queue.Queue()
@@ -57,12 +57,23 @@ def speak_all(texts):
 
     threading.Thread(target=produce, daemon=True).start()
     first = None
+    slice_ = voice.config.sample_rate // 10  # write 100 ms at a time so stop is quick
     with sd.OutputStream(samplerate=voice.config.sample_rate, channels=1, dtype="int16",
                          device=config.OUTPUT_DEVICE) as out:
-        while (chunk := chunks.get()) is not None:
+        while not (stop and stop.is_set()):
+            try:
+                chunk = chunks.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if chunk is None:
+                break
             if first is None:
                 first = time.perf_counter()
-            out.write(chunk.reshape(-1, 1))
+            for i in range(0, len(chunk), slice_):
+                if stop and stop.is_set():
+                    out.abort()  # cut off now rather than playing what's buffered
+                    break
+                out.write(chunk[i:i + slice_].reshape(-1, 1))
     return first
 
 

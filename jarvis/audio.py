@@ -38,8 +38,12 @@ class Mic:
         self._stream.stop()
         self._stream.close()
 
-    def read(self):
-        return self._queue.get()
+    def read(self, timeout=None):
+        """The next block; with a timeout, None if none came in time."""
+        try:
+            return self._queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
 
     def clear(self):
         """Drop queued audio, e.g. Jarvis's own voice recorded while it was speaking."""

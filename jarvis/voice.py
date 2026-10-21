@@ -3,6 +3,7 @@
 Started by jarvis.main. Each turn logs how long every stage took.
 """
 
+import json
 import logging
 import queue
 import re
@@ -89,6 +90,54 @@ class _Sentences:
             yield sentence
 
 
+# Said while Jarvis is talking (or thinking), these cut it off. Vosk listens with only these
+# phrases plus [unk] (anything else), and the whole utterance must be one of them, so Jarvis
+# saying "stop by the office" or "nothing to cancel" (any echo the canceller misses) doesn't count.
+STOP_PHRASES = ["stop", "cancel", "stop it", "stop talking", "shut up", "be quiet", "quiet",
+                "enough", "that's enough", "never mind", "forget it", "jarvis stop", "jarvis cancel",
+                "okay stop", "stop stop"]
+_vosk = None
+
+
+def _stop_recognizer():
+    global _vosk
+    import vosk
+    if _vosk is None:
+        vosk.SetLogLevel(-1)
+        _vosk = vosk.Model(str(config.VOSK_MODEL))
+    return vosk.KaldiRecognizer(_vosk, audio.SAMPLE_RATE, json.dumps(STOP_PHRASES + ["[unk]"]))
+
+
+def _listen_for_stop(mic, stop, done):
+    """While Jarvis talks, listen on the (echo-cancelled) mic for "stop" or "cancel" and set
+    stop when heard. Runs until done is set."""
+    rec = _stop_recognizer()
+    while not done.is_set():
+        block = mic.read(timeout=0.1)
+        if block is None or not rec.AcceptWaveform(block.tobytes()):
+            continue
+        text = json.loads(rec.Result())["text"]
+        if text in STOP_PHRASES:
+            log.info("heard %r: stopping", text)
+            stop.set()
+            return
+        if text:
+            log.info("heard %r while talking (not a stop)", text)
+
+
+def _speak(mic, texts):
+    """Speak texts, stopping if the owner says stop. Returns (time sound started or None,
+    whether it was stopped)."""
+    stop, done = threading.Event(), threading.Event()
+    listener = threading.Thread(target=_listen_for_stop, args=(mic, stop, done), name="stop", daemon=True)
+    listener.start()
+    try:
+        return tts.speak_all(texts, stop=stop), stop.is_set()
+    finally:
+        done.set()
+        listener.join()
+
+
 _last_reply = None
 
 
@@ -104,9 +153,10 @@ def handle(mic, brain, utterance, follow_up=False):
     log.info("you: %s", text)
     if _last_reply and is_repeat_request(text):
         log.info("repeating last reply (local, no Claude)")
-        say(_last_reply)
+        with _speaker:
+            _, stopped = _speak(mic, [_last_reply])
         mic.clear()
-        return True
+        return not stopped
     sentences, result = _Sentences(), {}
 
     def think():
@@ -121,7 +171,11 @@ def handle(mic, brain, utterance, follow_up=False):
     thinker = threading.Thread(target=think, name="claude", daemon=True)
     with _speaker:
         thinker.start()
-        first = tts.speak_all(sentences)  # speaks while Claude is still writing
+        first, stopped = _speak(mic, sentences)  # speaks while Claude is still writing
+        if stopped:
+            # "Stop" or "cancel": Claude may still be writing, but nobody wants the rest.
+            mic.clear()
+            return False
         thinker.join()
         if "error" in result:
             raise result["error"]
@@ -131,8 +185,11 @@ def handle(mic, brain, utterance, follow_up=False):
             return False
         if not sentences.spoken:  # a reply that wasn't streamed, e.g. after a refusal
             start = time.perf_counter()
-            tts.speak(reply)
+            _, stopped = _speak(mic, [reply])
             first = start
+            if stopped:
+                mic.clear()
+                return False
     _last_reply = " ".join(sentences.spoken) or reply
     log.info("jarvis: %s", _last_reply)
     # Recording only stops after SILENCE_SECONDS of quiet, so that's part of the wait too.
@@ -148,6 +205,7 @@ def run():
     tools.warm_up()
     stt.get_model()
     tts.get_voice()
+    _stop_recognizer()
     notify.register("voice", say)
     with audio.Mic() as mic:
         log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)", config.WAKE_THRESHOLD)
