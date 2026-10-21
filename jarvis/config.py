@@ -22,6 +22,7 @@ MAX_TOKENS_DISCORD = int(os.getenv("MAX_TOKENS_DISCORD", "2000"))  # text replie
 CLAUDE_EFFORT = os.getenv("CLAUDE_EFFORT", "low")  # low/medium/high: more thinking = slower
 CLAUDE_THINKING = os.getenv("CLAUDE_THINKING", "off") == "on"  # thinking before replying
 HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "10"))  # past exchanges sent with each request
+PROJECT_MODEL = os.getenv("PROJECT_MODEL", "sonnet")  # Claude Code model for project mode
 
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "on") == "on"
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")

@@ -116,6 +116,7 @@ the login command in #jarvis. Quick check: `.venv/bin/python -m jarvis.tools.onq
 | `CLAUDE_THINKING` | `off` | `on` lets Claude think first: slower, rarely better for this |
 | `CLAUDE_EFFORT` | `low` | `low` / `medium` / `high` |
 | `HISTORY_TURNS` | `10` | Past exchanges sent with each request |
+| `PROJECT_MODEL` | `sonnet` | Claude Code model for project mode (`opus` uses up the plan faster) |
 | `WHISPER_MODEL` | `large-v3-turbo` | `tiny.en` / `base.en` / `small.en` for CPU |
 | `WHISPER_DEVICE` | `cuda` | `cpu` uses int8 and `WHISPER_THREADS` |
 | `PIPER_VOICE` | `models/piper/en_GB-alan-medium.onnx` | |
@@ -137,13 +138,35 @@ the login command in #jarvis. Quick check: `.venv/bin/python -m jarvis.tools.onq
 Done: TTS, STT (GPU), Claude with tools, wake word + end-of-speech detection, full pipeline,
 systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, OnQ, briefings.
 
+## Project mode
+
+For longer jobs (researching people or companies, a long discussion), say "Jarvis, start a
+project: ..." (or ask in Discord). Jarvis hands it to Claude Code (`claude -p`, on the Claude plan
+it's logged in with, not the API key) in `data/projects/<name>/`, and keeps one Claude Code
+session per project.
+
+- Claude Code is told that only text inside `<say>...</say>` is read aloud: a line when it
+  starts, an update about once a minute or when it finds something, and a short summary at the
+  end. Jarvis says those between conversations, and "still working on it" after two quiet
+  minutes. Everything it writes goes to a thread in #jarvis.
+- By voice, what you say after "Hey Jarvis" goes to the project until you say "end project"
+  (which also stops a run in progress). Messages sent mid-run wait for it to finish. "Stop"
+  only cuts off the speech.
+- Writing in the project's Discord thread also sends to the project.
+- "Resume the ... project" reopens one; "what projects do I have" lists them.
+- Claude Code gets web search and fetch only: no shell and no file edits.
+
+Log in once with `claude` in a terminal on this machine. It shares the plan's usage limits with
+your own Claude Code use.
+
 ## Tools
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
 (Google Docs in the Jarvis Notes Drive folder), `get_weather` (Kingston, Open-Meteo), `system_status`, OnQ (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
-`onq_announcements`, `onq_grades`, `onq_syllabus` (text cached in `data/onq-syllabi/`).
+`onq_announcements`, `onq_grades`, `onq_syllabus` (text cached in `data/onq-syllabi/`),
+`start_project` / `resume_project` / `list_projects` (project mode, above).
 
 To add one, write a function in a module under `jarvis/tools/` and decorate it:
 

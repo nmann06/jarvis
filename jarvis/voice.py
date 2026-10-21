@@ -14,7 +14,7 @@ import wave
 import numpy as np
 import sounddevice as sd
 
-from jarvis import audio, config, llm, notify, stt, tools, tts
+from jarvis import audio, config, llm, notify, project, stt, tools, tts
 from jarvis.wakeword import WakeWord
 
 log = logging.getLogger("jarvis.voice")
@@ -57,9 +57,17 @@ _REPEAT = re.compile(_FILLER + r"(?:"
                      r")" + r"(?: please| jarvis)*")
 
 
+def _words(text):
+    return " ".join(re.sub(r"[^a-z ]+", " ", text.lower().replace("'", " ")).split())
+
+
 def is_repeat_request(text):
-    words = re.sub(r"[^a-z ]+", " ", text.lower().replace("'", " ")).split()
-    return bool(_REPEAT.fullmatch(" ".join(words)))
+    return bool(_REPEAT.fullmatch(_words(text)))
+
+
+# Leaving project mode. Like repeat requests, the whole utterance must match.
+_END_PROJECT = re.compile(_FILLER + r"(?:end|close|exit|leave|quit|stop|finish|that s it for)"
+                          r" (?:the |this )?project(?: mode)?(?: please| jarvis)*")
 
 
 class _Sentences:
@@ -183,6 +191,8 @@ def handle(mic, brain, utterance, follow_up=False):
             _, stopped = _speak(mic, [_last_reply])
         mic.clear()
         return not stopped
+    if (p := project.voice_project()) is not None:
+        return _to_project(mic, p, text)
     sentences, result = _Sentences(), {}
 
     def think():
@@ -226,6 +236,36 @@ def handle(mic, brain, utterance, follow_up=False):
     return True
 
 
+def _to_project(mic, p, text):
+    """In project mode, what the owner says goes to Claude Code instead of Jarvis's Claude."""
+    global _last_reply
+    if _END_PROJECT.fullmatch(_words(text)):
+        project.end_voice()
+        reply = f"Closed the {p.name} project. Back to normal, sir."
+    else:
+        reply = ("Got it. I'll pass that on when it finishes what it's doing." if p.send(text)
+                 else "On it.")
+    with _speaker:
+        _speak(mic, [reply])
+    _last_reply = reply
+    log.info("jarvis (project %s): %s", p.slug, reply)
+    mic.clear()
+    return False  # no follow-up window: the project's updates come in between conversations
+
+
+def _speak_updates(mic):
+    """Say what a project has queued to say, between conversations."""
+    global _last_reply
+    lines = []
+    while not project.speech.empty():
+        lines.append(project.speech.get_nowait())
+    log.info("project says: %s", " ".join(lines))
+    with _speaker:
+        _speak(mic, lines)
+    _last_reply = " ".join(lines)
+    mic.clear()
+
+
 def run():
     wake, brain = WakeWord(), llm.Brain("voice")
     tools.warm_up()
@@ -236,7 +276,10 @@ def run():
     with audio.Mic() as mic:
         log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)", config.WAKE_THRESHOLD)
         while True:
-            score = wake.wait(mic)
+            score = wake.wait(mic, interrupt=lambda: not project.speech.empty())
+            if score is None:
+                _speak_updates(mic)
+                continue
             log.info("wake (score %.2f)", score)
             play(CHIME)
             utterance = audio.record_utterance(mic, preroll=wake.preroll)
