@@ -17,7 +17,8 @@ def _device(value):
 
 
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-5-5")
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))  # caps reply length and cost
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))  # caps spoken reply length and cost
+MAX_TOKENS_DISCORD = int(os.getenv("MAX_TOKENS_DISCORD", "2000"))  # text replies can be longer
 CLAUDE_EFFORT = os.getenv("CLAUDE_EFFORT", "low")  # low/medium/high: more thinking = slower
 CLAUDE_THINKING = os.getenv("CLAUDE_THINKING", "off") == "on"  # thinking before replying
 HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "10"))  # past exchanges sent with each request

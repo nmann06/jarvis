@@ -71,6 +71,7 @@ class Brain:
     def __init__(self, channel="voice"):
         self.channel = channel
         self._system = SYSTEM.format(style=STYLES[channel])
+        self._max_tokens = config.MAX_TOKENS_DISCORD if channel == "discord" else config.MAX_TOKENS
         self._client = anthropic.Anthropic()
         # Finished turns, each a list of messages, oldest dropped first. With thinking off they
         # keep their tool calls and results, so Claude can see what it already did (otherwise
@@ -108,7 +109,7 @@ class Brain:
 
         for _ in range(MAX_TOOL_ROUNDS):
             with self._client.messages.stream(
-                    model=config.CLAUDE_MODEL, max_tokens=config.MAX_TOKENS, system=self._system_now(),
+                    model=config.CLAUDE_MODEL, max_tokens=self._max_tokens, system=self._system_now(),
                     tools=tools.SCHEMAS, messages=messages,
                     output_config={"effort": config.CLAUDE_EFFORT}, **_thinking()) as stream:
                 for delta in stream.text_stream if on_text else ():
@@ -125,7 +126,7 @@ class Brain:
             if response.stop_reason != "tool_use" or not calls:
                 reply = " ".join(b.text for b in response.content if b.type == "text").strip()
                 if response.stop_reason == "max_tokens":
-                    log.warning("reply cut off at max_tokens=%d", config.MAX_TOKENS)
+                    log.warning("reply cut off at max_tokens=%d", self._max_tokens)
                 break
 
             if on_text:
