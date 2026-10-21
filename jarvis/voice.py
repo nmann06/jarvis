@@ -123,6 +123,9 @@ class _Sentences:
 STOP_PHRASES = ["stop", "cancel", "stop it", "stop talking", "shut up", "be quiet", "quiet",
                 "enough", "that's enough", "never mind", "forget it", "jarvis stop", "jarvis cancel",
                 "okay stop", "stop stop"]
+# Not stops, but in the grammar so Vosk has somewhere else to put them: with only the stop
+# phrases to choose from, an echoed "yes sir" came out as "stop".
+_DECOYS = ["sir", "yes sir", "no sir", "of course sir", "certainly sir"]
 _vosk = None
 
 
@@ -132,7 +135,8 @@ def _stop_recognizer():
     if _vosk is None:
         vosk.SetLogLevel(-1)
         _vosk = vosk.Model(str(config.VOSK_MODEL))
-    return vosk.KaldiRecognizer(_vosk, audio.SAMPLE_RATE, json.dumps(STOP_PHRASES + ["[unk]"]))
+    return vosk.KaldiRecognizer(_vosk, audio.SAMPLE_RATE,
+                                json.dumps(STOP_PHRASES + _DECOYS + ["[unk]"]))
 
 
 def _listen_for_stop(mic, stop, done, saying):
