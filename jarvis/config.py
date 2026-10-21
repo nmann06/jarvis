@@ -44,6 +44,8 @@ GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")  # job-search sheet, from its
 TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/authorize
 TRELLO_BOARD = os.getenv("TRELLO_BOARD", "todo")  # main todo board
+SMITH_USER = os.getenv("SMITH_USER", "")  # smithlearning.ca login, so expired sessions renew
+SMITH_PASSWORD = os.getenv("SMITH_PASSWORD", "")
 
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 # Small Vosk model that listens only for "stop"/"cancel" while Jarvis is talking.

@@ -129,6 +129,11 @@ are kept in `data/onq-cookies.json` (private) and the browser profile in `data/o
 expired OnQ sessions are renewed headless. If Microsoft wants the password again, Jarvis posts
 the login command in #jarvis. Quick check: `.venv/bin/python -m jarvis.tools.onq`.
 
+Smith Learning (smithlearning.ca, the Smith School of Business Brightspace) works the same
+way and the OnQ tools cover both sites. It signs in with a Smith username and a password (no MFA): put `SMITH_USER`
+and `SMITH_PASSWORD` in `.env` and Jarvis signs in by itself, or sign in once with
+`.venv/bin/python -m jarvis.tools.onq login smith` (asked again when the session expires).
+
 ### Discord setup
 
 1. discord.com/developers/applications -> New Application -> Bot -> Reset Token; put it in `.env`
@@ -203,9 +208,9 @@ systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, O
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
-(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, OnQ (read-only):
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, OnQ and Smith Learning (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
-`onq_announcements`, `onq_grades`, `onq_syllabus` (text cached in `data/onq-syllabi/`).
+`onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`).
 
 To add one, write a function in a module under `jarvis/tools/` and decorate it:
 
