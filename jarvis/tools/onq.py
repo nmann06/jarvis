@@ -693,6 +693,8 @@ def onq_get_file(course, item):
         f = drive.save(data, name, mime.split(";")[0])
         notify.record(f"📥 Saved {name} from {c['name']} to Google Drive: [{name}]({f['webViewLink']})")
         said = f"Not in {drive.CHROME}, so Jarvis saved it to the owner's Google Drive, in {drive.JARVIS}"
+        note = ("(Just uploaded: Drive can take a minute to pull out its text, so if it reads as "
+                "empty, try again shortly.) " + note)
     return (f"{said}: {f['name']} (Drive file id {f['id']}, {f['webViewLink']}). Open it with "
             f"Google Drive tools using that file id. {note}").strip()
 
