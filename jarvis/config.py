@@ -29,6 +29,7 @@ if _owner and not _owner.isdigit():
     raise SystemExit(f"DISCORD_OWNER_ID must be your numeric Discord user ID, not {_owner!r} "
                      "(Developer Mode on, right-click your name, Copy User ID)")
 DISCORD_OWNER_ID = int(_owner or 0)  # the only user the bot answers
+DISCORD_CHANNEL = os.getenv("DISCORD_CHANNEL", "jarvis")  # server channel where it answers everything
 
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster

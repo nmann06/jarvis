@@ -43,7 +43,8 @@ a follow-up without the wake word. Claude is told the follow-up came without the
 ignores it if it sounds like you're talking to someone else. A falling chime means it has gone
 back to waiting for "Hey Jarvis".
 
-Discord: DM the bot. It answers only `DISCORD_OWNER_ID`. Timers announce themselves where they
+Discord: DM the bot, @mention it in a server, reply to one of its messages, or write in a
+`#jarvis` channel (`DISCORD_CHANNEL`). It answers only `DISCORD_OWNER_ID`. Timers announce themselves where they
 were set (spoken or by DM).
 
 ### Discord setup

@@ -22,6 +22,7 @@ def send(name, text):
     if sink is None:
         log.warning("no channel to deliver: %s", text)
         return
+    log.info("alert via %s: %s", name if name in _sinks else "fallback", text)
     try:
         sink(text)
     except Exception:

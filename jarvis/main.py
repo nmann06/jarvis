@@ -26,6 +26,7 @@ def main():
                         datefmt="%H:%M:%S")
     for noisy in ("httpx", "httpx2", "faster_whisper", "discord"):  # routine chatter
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    logging.getLogger("discord.client").setLevel(logging.ERROR)  # "PyNaCl not installed": voice chat, unused
 
     if not config.VOICE_ENABLED and not config.DISCORD_TOKEN:
         raise SystemExit("Nothing to run: voice is off and DISCORD_TOKEN is not set.")

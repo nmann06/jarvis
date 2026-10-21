@@ -1,6 +1,8 @@
-"""Discord front end: a bot that chats with the owner in direct messages.
+"""Discord front end: a bot that chats with the owner.
 
-Only DISCORD_OWNER_ID gets answers; messages from anyone else are ignored.
+It answers the owner's DMs, and in servers it answers the owner when @mentioned, when they reply
+to one of its messages, or anywhere in a channel named DISCORD_CHANNEL. Only DISCORD_OWNER_ID gets
+answers; messages from anyone else are ignored.
 """
 
 import asyncio
@@ -43,10 +45,18 @@ class JarvisBot(discord.Client):
         for part in _chunks(text):
             await self.owner.send(part)
 
+    def _addressed(self, message):
+        if message.guild is None:
+            return True  # a DM
+        replied_to = message.reference and message.reference.resolved
+        return (self.user in message.mentions
+                or getattr(message.channel, "name", None) == config.DISCORD_CHANNEL
+                or (isinstance(replied_to, discord.Message) and replied_to.author == self.user))
+
     async def on_message(self, message):
-        if message.author.id != config.DISCORD_OWNER_ID or message.guild is not None:
-            return  # owner's DMs only
-        text = message.content.strip()
+        if message.author.id != config.DISCORD_OWNER_ID or not self._addressed(message):
+            return
+        text = message.content.replace(self.user.mention, "").replace(f"<@!{self.user.id}>", "").strip()
         if not text:
             return
         log.info("discord you: %s", text)
