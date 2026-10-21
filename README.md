@@ -75,6 +75,15 @@ send. It also reads and edits the job-search Google Sheet.
 6. Put the sheet's ID (the part of its URL between `/d/` and `/edit`) in `.env` as
    `GOOGLE_SHEET_ID`, then `systemctl --user restart jarvis`.
 
+### OnQ setup
+
+OnQ (Brightspace) signs in through Microsoft with MFA, so a real Chromium does it once, on this
+laptop's own screen (works from SSH too; the window opens on display :0):
+`.venv/bin/python -m jarvis.tools.onq login`. Choose **Yes** at "Stay signed in". The cookies
+are kept in `data/onq-cookies.json` (private) and the browser profile in `data/onq-profile`;
+expired OnQ sessions are renewed headless. If Microsoft wants the password again, Jarvis posts
+the login command in #jarvis. Quick check: `.venv/bin/python -m jarvis.tools.onq`.
+
 ### Discord setup
 
 1. discord.com/developers/applications -> New Application -> Bot -> Reset Token; put it in `.env`
@@ -131,7 +140,9 @@ systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, O
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `read_notes`
-(`data/notes.md`), `get_weather` (Kingston, Open-Meteo), `system_status`.
+(`data/notes.md`), `get_weather` (Kingston, Open-Meteo), `system_status`, OnQ (read-only):
+`onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
+`onq_announcements`, `onq_grades`, `onq_syllabus` (text cached in `data/onq-syllabi/`).
 
 To add one, write a function in a module under `jarvis/tools/` and decorate it:
 

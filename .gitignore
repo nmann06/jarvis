@@ -5,3 +5,6 @@ models/
 data/*.wav
 .google_token.json
 google_client.json
+data/onq-profile/
+data/onq-cookies.json
+data/onq-syllabi/

@@ -10,6 +10,9 @@ numpy==2.5.4
 nvidia-cublas-cu12==12.9.2.10
 nvidia-cudnn-cu12==9.27.0.42
 piper-tts==1.8.0
+playwright==1.64.0
+pypdf==6.21.1
+python-docx==1.2.0
 psutil==7.2.2
 python-dotenv==1.2.4
 requests==2.34.2
