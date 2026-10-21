@@ -9,6 +9,7 @@ import queue
 import re
 import threading
 import time
+import wave
 
 import numpy as np
 import sounddevice as sd
@@ -108,28 +109,53 @@ def _stop_recognizer():
     return vosk.KaldiRecognizer(_vosk, audio.SAMPLE_RATE, json.dumps(STOP_PHRASES + ["[unk]"]))
 
 
-def _listen_for_stop(mic, stop, done):
+def _listen_for_stop(mic, stop, done, saying):
     """While Jarvis talks, listen on the (echo-cancelled) mic for "stop" or "cancel" and set
-    stop when heard. Runs until done is set."""
-    rec = _stop_recognizer()
-    while not done.is_set():
-        block = mic.read(timeout=0.1)
-        if block is None or not rec.AcceptWaveform(block.tobytes()):
-            continue
-        text = json.loads(rec.Result())["text"]
-        if text in STOP_PHRASES:
-            log.info("heard %r: stopping", text)
-            stop.set()
-            return
-        if text:
-            log.info("heard %r while talking (not a stop)", text)
+    stop when heard. saying() is what Jarvis is saying now. Runs until done is set."""
+    rec, heard = _stop_recognizer(), []
+    try:
+        while not done.is_set():
+            block = mic.read(timeout=0.1)
+            if block is None:
+                continue
+            heard.append(block)
+            # Act on the partial result too: Vosk only finishes an utterance after a pause,
+            # which may not come while Jarvis is still talking.
+            if rec.AcceptWaveform(block.tobytes()):
+                text = json.loads(rec.Result())["text"]
+            else:
+                text = json.loads(rec.PartialResult())["partial"]
+            if text in STOP_PHRASES:
+                # The canceller lets some echo through, mostly as a reply starts, so Jarvis
+                # saying "stop by the office" could otherwise stop itself.
+                said = set(re.sub(r"[^a-z' ]+", " ", saying().lower()).split())
+                if said & set(text.split()):
+                    log.info("heard %r, but I just said it myself: ignored", text)
+                    rec = _stop_recognizer()
+                    continue
+                log.info("heard %r: stopping", text)
+                stop.set()
+                return
+            if text and text != getattr(rec, "_logged", None):
+                rec._logged = text
+                log.info("heard %r while talking (not a stop)", text)
+    finally:
+        if config.SAVE_STOP_AUDIO and heard:
+            path = config.ROOT / "data" / f"stop-listen-{time.strftime('%H%M%S')}.wav"
+            path.parent.mkdir(exist_ok=True)
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1), w.setsampwidth(2), w.setframerate(audio.SAMPLE_RATE)
+                w.writeframes(np.concatenate(heard).tobytes())
 
 
 def _speak(mic, texts):
-    """Speak texts, stopping if the owner says stop. Returns (time sound started or None,
-    whether it was stopped)."""
+    """Speak texts (a list, or _Sentences still streaming in), stopping if the owner says stop.
+    Returns (time sound started or None, whether it was stopped)."""
     stop, done = threading.Event(), threading.Event()
-    listener = threading.Thread(target=_listen_for_stop, args=(mic, stop, done), name="stop", daemon=True)
+    saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
+              else (lambda: " ".join(texts)))
+    listener = threading.Thread(target=_listen_for_stop, args=(mic, stop, done, saying),
+                                name="stop", daemon=True)
     listener.start()
     try:
         return tts.speak_all(texts, stop=stop), stop.is_set()

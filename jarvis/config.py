@@ -44,6 +44,7 @@ TRELLO_BOARD = os.getenv("TRELLO_BOARD", "todo")  # main todo board
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 # Small Vosk model that listens only for "stop"/"cancel" while Jarvis is talking.
 VOSK_MODEL = ROOT / os.getenv("VOSK_MODEL", "models/vosk-model-small-en-us-0.15")
+SAVE_STOP_AUDIO = os.getenv("SAVE_STOP_AUDIO", "") == "1"  # debugging: keep what it heard in data/
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
