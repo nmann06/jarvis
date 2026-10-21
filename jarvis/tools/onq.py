@@ -239,7 +239,8 @@ def _submitted(course_id, folder_id):
 
 def due_items(start, end):
     """Dated work this term between start and end, from each course's OnQ calendar,
-    assignment folders and quizzes: [{"course", "title", "when", "kind", "id", "submitted"}],
+    assignment folders and quizzes: [{"course", "code", "title", "when", "kind", "id",
+    "submitted"}] (code is e.g. 'ELEC 353', without the term),
     sorted by time. submitted is True/False for assignments, None otherwise. Courses can
     switch any of these tools off, and some carry stale dates copied from past years, hence
     the date filter here rather than trusting the API's."""
@@ -250,7 +251,8 @@ def due_items(start, end):
             return
         when = _time(when)
         if start <= when <= end and key not in items:
-            items[key] = {"course": course["name"], "title": title.strip(), "when": when,
+            items[key] = {"course": course["name"], "code": TERM.sub("", course["code"]).strip(),
+                          "title": title.strip(), "when": when,
                           "kind": kind, "id": f"{course['id']}/{key}", "folder": folder}
 
     for c in courses():
