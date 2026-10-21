@@ -8,6 +8,7 @@
 - important-email alerts: new unread mail that Claude judges worth a ping.
 
 What was already sent is kept in data/proactive.json, so a restart doesn't repeat anything.
+Reminders that would land after 10 pm (work due at 11:59 PM) go out at 10 pm instead.
 If Jarvis was off when reminders were due, only the most recent missed one is sent.
 """
 
@@ -45,6 +46,7 @@ REMIND_BEFORE = {
     "work": [timedelta(days=2), timedelta(days=1)],
 }
 ALL_DAY_TIME = 9  # an all-day deadline counts as due at 9 am for reminders
+LATEST_REMINDER_HOUR = 22  # a reminder that would go out later (e.g. for 11:59 PM work) goes at 10 pm
 
 EMAIL_QUERY = "in:inbox is:unread newer_than:2d -category:promotions -category:social -category:forums"
 EMAIL_JUDGE = """You screen new email for your owner, an electrical engineering student at \
@@ -145,10 +147,15 @@ def upcoming_deadlines(now, days):
     return found
 
 
+def _send_at(when):
+    """When a reminder due at when is posted: no later than 10 pm that day."""
+    return min(when, when.replace(hour=LATEST_REMINDER_HOUR, minute=0, second=0, microsecond=0))
+
+
 def _remind(sent, key, due, offsets, now, message):
     """Post message if a reminder offset has passed that wasn't covered yet. sent maps
     "id|due" -> offsets already covered (seconds)."""
-    passed = [o for o in offsets if due - o <= now]
+    passed = [o for o in offsets if _send_at(due - o) <= now]
     done = set(sent.get(key, []))
     if not passed or int(min(passed).total_seconds()) in done:
         return
@@ -324,11 +331,12 @@ if __name__ == "__main__":
     elif what == "reminders":
         for kind, due, e in upcoming_deadlines(now, 14):
             print(f"{kind:5} {e['title']} [{e['calendar']}] due {_when(due, now)}; reminders at "
-                  + ", ".join(f"{due - o:%a %b %d %I:%M %p}" for o in REMIND_BEFORE[kind]))
+                  + ", ".join(f"{_send_at(due - o):%a %b %d %I:%M %p}" for o in REMIND_BEFORE[kind]))
     elif what == "onq":
         for i in onq.due_items(now, now + timedelta(days=14)):
             print(f"{i['kind']:10} {i['title']} ({i['code']}) due {_when(i['when'], now)}, "
-                  f"submitted={i['submitted']}"
+                  f"submitted={i['submitted']}; reminders at "
+                  + ", ".join(f"{_send_at(i['when'] - o):%a %b %d %I:%M %p}" for o in ONQ_REMIND_BEFORE)
                   + ("" if i["kind"] in ONQ_KINDS else " [no reminder: calendar event]"))
     elif what == "email":
         found = gmail.search_email(EMAIL_QUERY, 20)
