@@ -41,7 +41,8 @@ The unit file is `deploy/jarvis.service`, linked into `~/.config/systemd/user/`.
 Voice: say "Hey Jarvis", wait for the chime, then speak. After each reply it listens for 5 s for
 a follow-up without the wake word. Claude is told the follow-up came without the wake word and
 ignores it if it sounds like you're talking to someone else. A falling chime means it has gone
-back to waiting for "Hey Jarvis".
+back to waiting for "Hey Jarvis". "Say that again", "sorry?", "what did you say?" and similar
+replay the last reply word for word without asking Claude.
 
 Discord: DM the bot, @mention it in a server, reply to one of its messages, or write in a
 `#jarvis` channel (`DISCORD_CHANNEL`). It answers only `DISCORD_OWNER_ID`. Timers announce themselves where they
@@ -71,6 +72,7 @@ in `ICLOUD_CALENDAR` (default Home) unless Claude picks a better fit (Work, Clas
 .venv/bin/python -m jarvis.stt 5                           # records 5 s, prints the transcript
 .venv/bin/python -m tests.bench_stt                        # compares Whisper models (add @cpu to run one on CPU)
 .venv/bin/python -m jarvis.llm "What time is it?"       # ask Claude by text, with tools
+.venv/bin/python -m tests.discord_ping                      # DMs you a test notification
 .venv/bin/python -m jarvis.wakeword                        # prints WAKE + what you said, Ctrl+C to stop
 ```
 

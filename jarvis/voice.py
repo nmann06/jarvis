@@ -4,6 +4,7 @@ Started by jarvis.main. Each turn logs how long every stage took.
 """
 
 import logging
+import re
 import threading
 import time
 
@@ -39,8 +40,31 @@ def say(text):
         return tts.speak(text)
 
 
+# Ways of asking Jarvis to repeat itself, answered locally with the last reply word for word.
+# The whole utterance must be one of these (after dropping fillers), so "what did you say about
+# the weather" still goes to Claude.
+_FILLER = r"(?:hey |ok |okay |sorry |um |uh |jarvis |please |can you |could you |would you |" \
+          r"just |a |)*"
+_REPEAT = re.compile(_FILLER + r"(?:"
+                     r"(?:say|repeat) (?:that|it|this|what you said|yourself|the last (?:thing|part))"
+                     r"(?: again| one more time| for me)?|"
+                     r"repeat|again|one more time|come again|pardon(?: me)?|what|sorry|"
+                     r"what (?:was that|did you (?:just )?say)|"
+                     r"i (?:didn t|did not|couldn t|could not) (?:catch|hear|get) (?:that|it|you)"
+                     r")" + r"(?: please| jarvis)*")
+
+
+def is_repeat_request(text):
+    words = re.sub(r"[^a-z ]+", " ", text.lower().replace("'", " ")).split()
+    return bool(_REPEAT.fullmatch(" ".join(words)))
+
+
+_last_reply = None
+
+
 def handle(mic, brain, utterance, follow_up=False):
     """Transcribe, ask Claude, speak. Returns False if there was nothing to answer."""
+    global _last_reply
     t0 = time.perf_counter()
     text = stt.transcribe(utterance)
     t1 = time.perf_counter()
@@ -48,12 +72,18 @@ def handle(mic, brain, utterance, follow_up=False):
         log.info("heard nothing intelligible (%.1fs of audio)", len(utterance) / audio.SAMPLE_RATE)
         return False
     log.info("you: %s", text)
+    if _last_reply and is_repeat_request(text):
+        log.info("repeating last reply (local, no Claude)")
+        say(_last_reply)
+        mic.clear()
+        return True
     reply = brain.ask(text, follow_up=follow_up)
     t2 = time.perf_counter()
     if reply is None:
         log.info("not meant for me, back to idle (claude %.2fs)", t2 - t1)
         return False
     log.info("jarvis: %s", reply)
+    _last_reply = reply
     synth = say(reply)
     # Recording only stops after SILENCE_SECONDS of quiet, so that's part of the wait too.
     log.info("latency: silence %.2fs + stt %.2fs + claude %.2fs + tts %.2fs = %.2fs from end of "
