@@ -42,4 +42,4 @@ def run(name, args):
 
 
 # Import the tool modules so their @tool decorators run.
-from jarvis.tools import clock, notes, system, timers, weather  # noqa: E402,F401
+from jarvis.tools import clock, icloud_calendar, notes, system, timers, weather  # noqa: E402,F401

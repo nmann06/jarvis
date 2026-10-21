@@ -47,6 +47,12 @@ Discord: DM the bot, @mention it in a server, reply to one of its messages, or w
 `#jarvis` channel (`DISCORD_CHANNEL`). It answers only `DISCORD_OWNER_ID`. Timers announce themselves where they
 were set (spoken or by DM).
 
+### Apple Calendar setup
+
+account.apple.com -> Sign-In and Security -> App-Specific Passwords -> create one, then put your
+Apple ID email and that password in `.env` as `ICLOUD_USER` / `ICLOUD_APP_PASSWORD`. New events go
+in `ICLOUD_CALENDAR` (default Home) unless Claude picks a better fit (Work, Classes, ...).
+
 ### Discord setup
 
 1. discord.com/developers/applications -> New Application -> Bot -> Reset Token; put it in `.env`
@@ -100,7 +106,8 @@ systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, O
 
 ## Tools
 
-Claude can call: `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `read_notes`
+Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
+edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `read_notes`
 (`data/notes.md`), `get_weather` (Kingston, Open-Meteo), `system_status`.
 
 To add one, write a function in a module under `jarvis/tools/` and decorate it:

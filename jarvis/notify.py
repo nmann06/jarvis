@@ -27,3 +27,15 @@ def send(name, text):
         sink(text)
     except Exception:
         log.exception("failed to deliver on %s: %s", name, text)
+
+
+def record(text):
+    """A written heads-up of something Jarvis did (e.g. added an event): Discord only, never
+    spoken, since the spoken reply already covers it."""
+    sink = _sinks.get("discord")
+    log.info("record%s: %s", "" if sink else " (discord not running)", text)
+    if sink:
+        try:
+            sink(text)
+        except Exception:
+            log.exception("failed to send record: %s", text)

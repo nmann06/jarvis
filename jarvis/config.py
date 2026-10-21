@@ -31,6 +31,10 @@ if _owner and not _owner.isdigit():
 DISCORD_OWNER_ID = int(_owner or 0)  # the only user the bot answers
 DISCORD_CHANNEL = os.getenv("DISCORD_CHANNEL", "jarvis")  # server channel where it answers everything
 
+ICLOUD_USER = os.getenv("ICLOUD_USER", "")  # Apple ID email
+ICLOUD_APP_PASSWORD = os.getenv("ICLOUD_APP_PASSWORD", "")  # app-specific password, not the real one
+ICLOUD_CALENDAR = os.getenv("ICLOUD_CALENDAR", "Home")  # default calendar for new events
+
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
