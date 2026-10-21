@@ -32,18 +32,31 @@ class JarvisBot(discord.Client):
         super().__init__(intents=intents)
         self.brain = llm.Brain("discord")
         self.owner = None
+        self.home = None  # the #jarvis channel, where alerts and records go
 
     async def on_ready(self):
         self.owner = await self.fetch_user(config.DISCORD_OWNER_ID)
+        self.home = next((ch for g in self.guilds for ch in g.text_channels
+                          if ch.name == config.DISCORD_CHANNEL), None)
         loop = asyncio.get_running_loop()
         # Alerts come from other threads (timers, the voice loop), so hop onto the bot's loop.
         notify.register("discord", lambda text: asyncio.run_coroutine_threadsafe(
-            self.dm(text), loop).result(timeout=30))
-        log.info("discord: logged in as %s, talking to %s", self.user, self.owner)
+            self.alert(text), loop).result(timeout=30))
+        log.info("discord: logged in as %s, talking to %s; alerts go to %s", self.user,
+                 self.owner, f"#{self.home} in {self.home.guild}" if self.home else "DMs")
 
-    async def dm(self, text):
+    async def alert(self, text):
+        """Something Jarvis says unprompted: posted in #jarvis, with an @mention if
+        DISCORD_MENTION is on (that notifies even when the server is muted). Falls back to a DM
+        if that channel doesn't exist."""
+        if self.home is None:
+            for part in _chunks(text):
+                await self.owner.send(part)
+            return
+        if config.DISCORD_MENTION:
+            text = f"{self.owner.mention} {text}"
         for part in _chunks(text):
-            await self.owner.send(part)
+            await self.home.send(part, allowed_mentions=discord.AllowedMentions(users=[self.owner]))
 
     def _addressed(self, message):
         if message.guild is None:

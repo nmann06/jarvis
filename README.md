@@ -46,7 +46,8 @@ replay the last reply word for word without asking Claude.
 
 Discord: DM the bot, @mention it in a server, reply to one of its messages, or write in a
 `#jarvis` channel (`DISCORD_CHANNEL`). It answers only `DISCORD_OWNER_ID`. Timers announce themselves where they
-were set (spoken or by DM).
+were set: spoken, or posted in `#jarvis` (with an @mention unless `DISCORD_MENTION=off`), where
+calendar records also go.
 
 ### Apple Calendar setup
 

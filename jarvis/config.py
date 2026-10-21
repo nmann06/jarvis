@@ -29,7 +29,8 @@ if _owner and not _owner.isdigit():
     raise SystemExit(f"DISCORD_OWNER_ID must be your numeric Discord user ID, not {_owner!r} "
                      "(Developer Mode on, right-click your name, Copy User ID)")
 DISCORD_OWNER_ID = int(_owner or 0)  # the only user the bot answers
-DISCORD_CHANNEL = os.getenv("DISCORD_CHANNEL", "jarvis")  # server channel where it answers everything
+DISCORD_CHANNEL = os.getenv("DISCORD_CHANNEL", "jarvis")  # answers everything here; alerts go here
+DISCORD_MENTION = os.getenv("DISCORD_MENTION", "on") == "on"  # @mention the owner in alerts
 
 ICLOUD_USER = os.getenv("ICLOUD_USER", "")  # Apple ID email
 ICLOUD_APP_PASSWORD = os.getenv("ICLOUD_APP_PASSWORD", "")  # app-specific password, not the real one
