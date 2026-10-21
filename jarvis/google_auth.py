@@ -1,4 +1,4 @@
-"""Google sign-in shared by the Gmail and Sheets tools.
+"""Google sign-in shared by the Gmail, Sheets and notes (Drive) tools.
 
 One-time setup: put the OAuth client file at google_client.json, then run
     .venv/bin/python -m jarvis.google_auth
@@ -19,6 +19,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.file",  # only files Jarvis creates (notes)
 ]
 CLIENT_FILE = config.ROOT / "google_client.json"
 TOKEN_FILE = config.ROOT / ".google_token.json"

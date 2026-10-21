@@ -50,7 +50,7 @@ when it helps; no headings.""",
 }
 
 MAX_TOOL_ROUNDS = 5  # guard against a tool loop that never ends
-TOOL_MAX_TOKENS = 4000  # room for a long tool call, like an email draft, cut off at the reply limit
+TOOL_MAX_TOKENS = 8000  # room for a long tool call (a note, an email draft) cut off at the reply limit
 
 IGNORE = "IGNORE"
 FOLLOW_UP_NOTE = f"""This was picked up in the few seconds after your last reply, without the wake \

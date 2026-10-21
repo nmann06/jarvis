@@ -55,13 +55,14 @@ account.apple.com -> Sign-In and Security -> App-Specific Passwords -> create on
 Apple ID email and that password in `.env` as `ICLOUD_USER` / `ICLOUD_APP_PASSWORD`. New events go
 in `ICLOUD_CALENDAR` (default Home) unless Claude picks a better fit (Work, Classes, ...).
 
-### Google setup (Gmail + Sheets)
+### Google setup (Gmail, Sheets, Drive notes)
 
 Jarvis reads one Gmail inbox (forward your other accounts into it) and can save drafts, never
-send. It also reads and edits the job-search Google Sheet.
+send. It also reads and edits the job-search Google Sheet, and saves notes as Google Docs in a
+"Jarvis Notes" Drive folder (it can only see files it created there).
 
 1. console.cloud.google.com -> create a project (e.g. "Jarvis").
-2. APIs & Services -> Library: enable **Gmail API** and **Google Sheets API**.
+2. APIs & Services -> Library: enable **Gmail API**, **Google Sheets API** and **Google Drive API**.
 3. Google Auth Platform (OAuth consent screen): External, app name Jarvis, your email as support
    and contact. Under Audience add yourself as a test user, then press **Publish app** (stays
    unverified, which is fine for yourself; in Testing mode the sign-in expires every 7 days).
@@ -139,8 +140,8 @@ systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, O
 ## Tools
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
-edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `read_notes`
-(`data/notes.md`), `get_weather` (Kingston, Open-Meteo), `system_status`, OnQ (read-only):
+edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (Kingston, Open-Meteo), `system_status`, OnQ (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
 `onq_announcements`, `onq_grades`, `onq_syllabus` (text cached in `data/onq-syllabi/`).
 
@@ -161,7 +162,7 @@ then add the module to the import line at the bottom of `jarvis/tools/__init__.p
 - openWakeWord 0.6.0 is installed with `--no-deps`: it lists `tflite-runtime`, which has no
   Python 3.12 build, but Jarvis runs it on ONNX instead.
 - Conversation memory (last `HISTORY_TURNS` exchanges) lasts until Jarvis restarts; notes are
-  saved to disk.
+  saved in Google Drive.
 - `av` is pinned to 18.1.0: av 19 breaks faster-whisper 1.2.1.
 - The NVIDIA driver is the DKMS `nvidia-driver-595-open`, signed with the enrolled MOK key, so it
   works with Secure Boot on. cuBLAS/cuDNN come from pip and are loaded by `jarvis/stt.py`.
