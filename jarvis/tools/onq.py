@@ -29,6 +29,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urljoin
 
 import requests
 
@@ -576,6 +577,130 @@ def onq_syllabus(course):
     cut = len(text) > MAX_SYLLABUS
     return (CONTENT + f"{c['name']} syllabus ({title}):\n" + text[:MAX_SYLLABUS]
             + ("\n[...cut off]" if cut else ""))
+
+
+def _content(course):
+    """Every visible topic in a course's Content: [(module path, topic)], in course order.
+    Links in module descriptions that lead to the course's own site come too, as topics of
+    type "Page" with ids P1, P2, ...: some instructors post nothing as topics and keep all
+    their material on a page of course files linked from there (ELEC 371)."""
+    toc = course["site"].get(f"/d2l/api/le/{LE}/{course['id']}/content/toc")
+    found = [(where, t) for where, t in _topics(toc["Modules"])
+             if not t.get("IsHidden") and not t.get("IsBroken")]
+
+    def pages(modules, path=""):
+        for m in modules:
+            where = f"{path} / {m['Title']}".strip(" /")
+            for href, text in re.findall(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+                                         (m.get("Description") or {}).get("Html") or "", re.S):
+                url = urljoin(course["site"].host + "/", html.unescape(href))
+                if url.startswith(course["site"].host + "/"):
+                    yield where, {"TypeIdentifier": "Page", "Title": _plain(text) or url,
+                                  "Url": url, "LastModifiedDate": m.get("LastModifiedDate")}
+            yield from pages(m.get("Modules", []), where)
+    for n, (where, page) in enumerate(pages(toc["Modules"]), 1):
+        found.append((where, {**page, "TopicId": f"P{n}"}))
+    return found
+
+
+def _fetch(site, url):
+    """(final url, bytes, content type) of a page or file on the site itself, never elsewhere."""
+    if not url.startswith(site.host + "/"):
+        raise ValueError(f"Only {site.title} pages can be read here, not {url}")
+    r = site.http.get(url, timeout=30)
+    if not r.ok or not r.url.startswith(site.host + "/") or "/d2l/login" in r.url:
+        raise ValueError(f"Couldn't open {url} ({r.status_code})")
+    return r.url, r.content, r.headers.get("Content-Type", "")
+
+
+def _kind(t):
+    """'pdf', 'docx', ... for a file; 'page' for a description link; 'link' for anything else
+    (quizzes, web links)."""
+    if t.get("TypeIdentifier") == "Page":
+        return "page"
+    if t.get("TypeIdentifier") != "File":
+        return "link"
+    return (t.get("Url") or "").rsplit(".", 1)[-1].lower() or "file"
+
+
+@tool("List everything posted in one OnQ or Smith Learning course's Content area: lecture "
+      "slides and notes, labs, handouts, readings, links. Each line has its module, title, "
+      "file type, when it was last updated (files reused from past years keep their old "
+      "dates), whether the owner hasn't opened it yet, and an id for onq_read_content.",
+      course={"type": "string", "description": "Course code or name, e.g. 'ELEC 221'"})
+def onq_content(course):
+    c = _course(course)
+    lines = []
+    for where, t in _content(c):
+        when = _time(t["LastModifiedDate"]) if t.get("LastModifiedDate") else None
+        lines.append(f"{where} / {t['Title']} ({_kind(t)}"
+                     + (f", updated {when:%b} {when.day} {when.year}" if when else "")
+                     + (", unread" if t.get("Unread") else "") + f") [id {t['TopicId']}]")
+    if not lines:
+        return f"Nothing posted in {c['name']}'s Content yet."
+    return CONTENT + f"{c['name']}: {len(lines)} items\n" + "\n".join(lines)
+
+
+@tool("Read the text of one file posted in an OnQ or Smith Learning course's Content (PDF, "
+      "Word or web page), e.g. lecture notes or a lab handout. Find it with onq_content first. "
+      "A page also lists the files it links to; read one of those by giving its URL.",
+      course={"type": "string", "description": "Course code or name, e.g. 'ELEC 221'"},
+      item={"type": "string", "description": "The item's id from onq_content, its title, or "
+                                              "the URL of a file on the course site"})
+def onq_read_content(course, item):
+    c = _course(course)
+    if item.strip().startswith("http"):
+        return _read_page(c, item.strip(), item.strip())
+    topics = _content(c)
+    want = re.sub(r"\W", "", item).lower()
+    found = ([(w, t) for w, t in topics if str(t["TopicId"]) == item.strip()]
+             or [(w, t) for w, t in topics if re.sub(r"\W", "", t["Title"]).lower() == want]
+             or [(w, t) for w, t in topics if want in re.sub(r"\W", "", t["Title"]).lower()])
+    if not found:
+        raise ValueError(f"Nothing called {item!r} in {c['name']}'s Content; see onq_content.")
+    if len({t["Title"] for _, t in found}) > 1:
+        raise ValueError(f"Several items match {item!r}, give an id: " + "; ".join(
+            f"{w} / {t['Title']} ({_kind(t)}) [id {t['TopicId']}]" for w, t in found[:15]))
+    # One title can be posted twice (a .docx and a .pdf of the same lab): PDF first.
+    where, t = sorted(found, key=lambda f: _kind(f[1]) != "pdf")[0]
+    if t.get("TypeIdentifier") == "Page":
+        return _read_page(c, t["Url"], f"{where} / {t['Title']}")
+    if t.get("TypeIdentifier") != "File":
+        url = t.get("Url") or ""
+        return f"{t['Title']} is a link, not a file: " + (c["site"].host + url if url.startswith("/") else url)
+    r = c["site"].get(f"/d2l/api/le/{LE}/{c['id']}/content/topics/{t['TopicId']}/file", raw=True)
+    text = _document_text(r.content, t.get("Url") or "", r.headers.get("Content-Type", ""))
+    return _clip(c, f"{where} / {t['Title']}", text)
+
+
+def _clip(course, label, text):
+    text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
+    if not text:
+        return f"{label} has no readable text (probably scanned or only images)."
+    cut = len(text) > MAX_SYLLABUS
+    return (CONTENT + f"{course['name']}: {label}\n" + text[:MAX_SYLLABUS]
+            + ("\n[...cut off]" if cut else ""))
+
+
+def _read_page(course, url, label):
+    """Text of a page or file on the course site; a web page starts with the files it links
+    to (full URLs, so they can be read next), ahead of text long enough to be cut off."""
+    url, data, mime = _fetch(course["site"], url)
+    text = _document_text(data, url.split("?")[0], mime)
+    if "html" in mime:
+        links = []
+        for href, name in re.findall(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+                                     data.decode(errors="replace"), re.S):
+            full = urljoin(url, html.unescape(href))
+            if full.startswith(course["site"].host + "/") and full not in (u for _, u in links):
+                # Hand-made pages leave anchors open, so a name can run on for paragraphs.
+                name = " ".join(_plain(name).split())
+                links.append((name[:80] + ("..." if len(name) > 80 else "")
+                              or full.rsplit("/", 1)[-1], full))
+        if links:
+            text = ("Linked files:\n" + "\n".join(f"{n}: {u}" for n, u in links)
+                    + "\n\nPage text:\n" + text)
+    return _clip(course, label, text)
 
 
 def login(site):

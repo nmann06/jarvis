@@ -235,7 +235,10 @@ Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; 
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
 (Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, OnQ and Smith Learning (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
-`onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`).
+`onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`),
+`onq_content` (everything posted under Content, plus pages linked from module descriptions, as some
+courses keep their material on one page of course files) and `onq_read_content` (the text of one
+posted file or page, or of a file on the course site by URL).
 
 To add one, write a function in a module under `jarvis/tools/` and decorate it:
 
