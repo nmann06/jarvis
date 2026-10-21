@@ -1,6 +1,8 @@
 """Text-to-speech with Piper. Run: python -m jarvis.tts "Some text" """
 
+import queue
 import sys
+import threading
 import time
 
 import numpy as np
@@ -30,13 +32,29 @@ def synthesize(text):
 
 
 def speak(text):
-    """Synthesize text and play it, blocking until done. Returns synthesis time in seconds."""
+    """Synthesize text and play it, blocking until done. Piper works a sentence at a time, so
+    the first sentence plays while the rest is synthesized. Returns seconds until sound starts."""
     start = time.perf_counter()
-    audio, rate = synthesize(text)
-    elapsed = time.perf_counter() - start
-    sd.play(audio, rate, device=config.OUTPUT_DEVICE)
-    sd.wait()
-    return elapsed
+    voice = get_voice()
+    syn = SynthesisConfig(length_scale=config.TTS_LENGTH_SCALE, volume=config.TTS_VOLUME)
+    chunks = queue.Queue()
+
+    def produce():
+        try:
+            for c in voice.synthesize(text, syn_config=syn):
+                chunks.put(c.audio_int16_array)
+        finally:
+            chunks.put(None)
+
+    threading.Thread(target=produce, daemon=True).start()
+    first = None
+    with sd.OutputStream(samplerate=voice.config.sample_rate, channels=1, dtype="int16",
+                         device=config.OUTPUT_DEVICE) as out:
+        while (chunk := chunks.get()) is not None:
+            if first is None:
+                first = time.perf_counter() - start
+            out.write(chunk.reshape(-1, 1))
+    return first or 0.0
 
 
 if __name__ == "__main__":

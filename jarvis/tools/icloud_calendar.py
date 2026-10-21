@@ -1,6 +1,7 @@
 """Apple Calendar via iCloud CalDAV: read events and add new ones (never edits or deletes)."""
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
 import caldav
@@ -57,16 +58,22 @@ def _describe(start, end, title, location=""):
 def events(start, end):
     """Events overlapping [start, end) on every calendar, oldest first, as dicts with the
     start and end (datetimes, or dates for all-day events), title, calendar, location and uid."""
-    found = []
+    def search(item):
+        name, cal = item
+        found = []
+        for ev in cal.search(start=start, end=end, event=True, expand=True):
+            c = ev.icalendar_component
+            s = _local(c.decoded("dtstart"))
+            found.append({"start": s, "end": _local(c.decoded("dtend")) if "dtend" in c else s,
+                          "title": str(c.get("summary", "(no title)")), "calendar": name,
+                          "location": str(c.get("location", "")) or None,
+                          "uid": str(c.get("uid", ""))})
+        return found
+
     with _lock:
-        for name, cal in _get_calendars().items():
-            for ev in cal.search(start=start, end=end, event=True, expand=True):
-                c = ev.icalendar_component
-                s = _local(c.decoded("dtstart"))
-                found.append({"start": s, "end": _local(c.decoded("dtend")) if "dtend" in c else s,
-                              "title": str(c.get("summary", "(no title)")), "calendar": name,
-                              "location": str(c.get("location", "")) or None,
-                              "uid": str(c.get("uid", ""))})
+        # One request per calendar; asking them all at once is several times faster.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            found = [e for part in pool.map(search, _get_calendars().items()) for e in part]
     sort_key = lambda e: (e["start"] if isinstance(e["start"], datetime)
                           else datetime.combine(e["start"], datetime.min.time(), TZ))
     return sorted(found, key=sort_key)
@@ -80,7 +87,14 @@ def get_events(start_date, days):
     found = events(start, start + timedelta(days=days))
     return [{"title": e["title"], "calendar": e["calendar"],
              "when": _describe(e["start"], e["end"], "").removeprefix(", "),
-             "location": e["location"]} for e in found] or "No events."
+             "location": e["location"]} | ({"lab": True} if _is_lab(e) else {})
+            for e in found] or "No events."
+
+
+def _is_lab(e):
+    # Labs aren't named as such in the Classes calendar; ECE labs are in Beamish-Munro Hall.
+    return e["calendar"] == "Classes" and ("lab" in e["title"].lower()
+                                           or "Beamish-Munro" in (e["location"] or ""))
 
 
 @tool("Add an event to the owner's Apple Calendar. Can't change or delete existing events. "

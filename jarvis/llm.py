@@ -10,6 +10,7 @@ from collections import deque
 import anthropic
 
 from jarvis import config, notify, tools
+from jarvis.tools.clock import get_time_and_date
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +34,11 @@ STYLES = {
     "voice": """You are speaking: everything you write is converted to speech, so:
 - Reply in one or two short spoken sentences unless asked for more.
 - Plain words only: no markdown, lists, emoji, URLs or symbols. Write numbers and units the way \
-you would say them, e.g. "nine degrees" not "9°C", "half past seven" not "19:30".
+you would say them, e.g. "nine degrees" not "9°C". Say times the way a clock reads: "twelve \
+thirty", "five thirty", "eight fifteen", "nine o'clock"; never "half past", "quarter to" or "noon".
+- When telling the owner what's on a day, unless they ask which classes: from the Classes \
+calendar say only where and when the first class is and how many classes there are in total, \
+plus any labs (events marked lab) with their times. Mention other events as usual.
 - The words come from speech recognition and may contain misheard words; go with the most \
 likely meaning.""",
     "discord": """You are chatting with the owner in Discord direct messages. Keep replies short \
@@ -71,6 +76,11 @@ class Brain:
         # replaying them after trimming old turns could be rejected.
         self._history = deque(maxlen=config.HISTORY_TURNS)
 
+    def _system_now(self):
+        # The time and date up front saves a get_time_and_date round trip (about a second)
+        # on questions like "what's on tomorrow".
+        return f"{self._system}\n\nIt is now {get_time_and_date()} (local time)."
+
     def ask(self, text, follow_up=False):
         token = notify.channel.set(self.channel)
         try:
@@ -93,7 +103,7 @@ class Brain:
 
         for _ in range(MAX_TOOL_ROUNDS):
             response = self._client.messages.create(
-                model=config.CLAUDE_MODEL, max_tokens=config.MAX_TOKENS, system=self._system,
+                model=config.CLAUDE_MODEL, max_tokens=config.MAX_TOKENS, system=self._system_now(),
                 tools=tools.SCHEMAS, messages=messages,
                 output_config={"effort": config.CLAUDE_EFFORT}, **_thinking())
             u = response.usage
