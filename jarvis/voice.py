@@ -4,6 +4,7 @@ Started by jarvis.main. Each turn logs how long every stage took.
 """
 
 import logging
+import queue
 import re
 import threading
 import time
@@ -59,6 +60,35 @@ def is_repeat_request(text):
     return bool(_REPEAT.fullmatch(" ".join(words)))
 
 
+class _Sentences:
+    """Claude's reply as it streams in, handed out one whole sentence at a time so speech can
+    start before Claude has finished. Iterating blocks until close()."""
+
+    def __init__(self):
+        self._queue, self._buffer, self.spoken = queue.Queue(), "", []
+
+    def add(self, text):
+        self._buffer += text
+        *done, self._buffer = re.split(r"(?<=[.!?])\s+|\n+", self._buffer)
+        for sentence in done:
+            self._put(sentence)
+
+    def close(self):
+        self._put(self._buffer)
+        self._queue.put(None)
+
+    def _put(self, sentence):
+        sentence = sentence.strip()
+        # A follow-up that wasn't meant for Jarvis comes back as IGNORE: never say it.
+        if sentence and sentence.rstrip(".").upper() != llm.IGNORE:
+            self.spoken.append(sentence)
+            self._queue.put(sentence)
+
+    def __iter__(self):
+        while (sentence := self._queue.get()) is not None:
+            yield sentence
+
+
 _last_reply = None
 
 
@@ -77,18 +107,38 @@ def handle(mic, brain, utterance, follow_up=False):
         say(_last_reply)
         mic.clear()
         return True
-    reply = brain.ask(text, follow_up=follow_up)
-    t2 = time.perf_counter()
-    if reply is None:
-        log.info("not meant for me, back to idle (claude %.2fs)", t2 - t1)
-        return False
-    log.info("jarvis: %s", reply)
-    _last_reply = reply
-    synth = say(reply)
+    sentences, result = _Sentences(), {}
+
+    def think():
+        try:
+            result["reply"] = brain.ask(text, follow_up=follow_up, on_text=sentences.add)
+        except Exception as e:
+            result["error"] = e
+        finally:
+            result["done"] = time.perf_counter()
+            sentences.close()
+
+    thinker = threading.Thread(target=think, name="claude", daemon=True)
+    with _speaker:
+        thinker.start()
+        first = tts.speak_all(sentences)  # speaks while Claude is still writing
+        thinker.join()
+        if "error" in result:
+            raise result["error"]
+        reply = result["reply"]
+        if reply is None and not sentences.spoken:
+            log.info("not meant for me, back to idle (claude %.2fs)", result["done"] - t1)
+            return False
+        if not sentences.spoken:  # a reply that wasn't streamed, e.g. after a refusal
+            start = time.perf_counter()
+            tts.speak(reply)
+            first = start
+    _last_reply = " ".join(sentences.spoken) or reply
+    log.info("jarvis: %s", _last_reply)
     # Recording only stops after SILENCE_SECONDS of quiet, so that's part of the wait too.
-    log.info("latency: silence %.2fs + stt %.2fs + claude %.2fs + tts %.2fs = %.2fs from end of "
-             "speech to voice", config.SILENCE_SECONDS, t1 - t0, t2 - t1, synth,
-             config.SILENCE_SECONDS + (t2 - t0) + synth)
+    log.info("latency: silence %.2fs + stt %.2fs + claude to first word %.2fs = %.2fs from end "
+             "of speech to voice (claude finished after %.2fs)", config.SILENCE_SECONDS, t1 - t0,
+             first - t1, config.SILENCE_SECONDS + first - t0, result["done"] - t1)
     mic.clear()  # drop Jarvis's own voice picked up by the mic
     return True
 

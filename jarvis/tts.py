@@ -32,17 +32,26 @@ def synthesize(text):
 
 
 def speak(text):
-    """Synthesize text and play it, blocking until done. Piper works a sentence at a time, so
-    the first sentence plays while the rest is synthesized. Returns seconds until sound starts."""
+    """Synthesize text and play it, blocking until done. Returns seconds until sound starts."""
     start = time.perf_counter()
+    first = speak_all([text])
+    return first - start if first else 0.0
+
+
+def speak_all(texts):
+    """Speak each piece of text as it arrives from texts (any iterable, e.g. sentences still
+    being written by Claude), blocking until the last is played. Piper works a sentence at a
+    time, so one sentence plays while the next is synthesized. Returns the perf_counter time
+    sound started, or None if there was nothing to say."""
     voice = get_voice()
     syn = SynthesisConfig(length_scale=config.TTS_LENGTH_SCALE, volume=config.TTS_VOLUME)
     chunks = queue.Queue()
 
     def produce():
         try:
-            for c in voice.synthesize(text, syn_config=syn):
-                chunks.put(c.audio_int16_array)
+            for text in texts:
+                for c in voice.synthesize(text, syn_config=syn):
+                    chunks.put(c.audio_int16_array)
         finally:
             chunks.put(None)
 
@@ -52,9 +61,9 @@ def speak(text):
                          device=config.OUTPUT_DEVICE) as out:
         while (chunk := chunks.get()) is not None:
             if first is None:
-                first = time.perf_counter() - start
+                first = time.perf_counter()
             out.write(chunk.reshape(-1, 1))
-    return first or 0.0
+    return first
 
 
 if __name__ == "__main__":

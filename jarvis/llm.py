@@ -36,9 +36,12 @@ STYLES = {
 - Plain words only: no markdown, lists, emoji, URLs or symbols. Write numbers and units the way \
 you would say them, e.g. "nine degrees" not "9°C". Say times the way a clock reads: "twelve \
 thirty", "five thirty", "eight fifteen", "nine o'clock"; never "half past", "quarter to" or "noon".
-- When telling the owner what's on a day, unless they ask which classes: from the Classes \
+- When telling the owner what's on a day, from the Classes \
 calendar say only where and when the first class is and how many classes there are in total, \
-plus any labs (events marked lab) with their times. Mention other events as usual.
+plus any labs (events marked lab) with their times. List the classes only if asked to list \
+them; "what classes do I have" still gets the summary. Mention other events as usual.
+- Before using a tool you may say a few words such as "Checking your calendar." and nothing \
+more; it is spoken while the tool runs.
 - The words come from speech recognition and may contain misheard words; go with the most \
 likely meaning.""",
     "discord": """You are chatting with the owner in Discord direct messages. Keep replies short \
@@ -79,16 +82,18 @@ class Brain:
     def _system_now(self):
         # The time and date up front saves a get_time_and_date round trip (about a second)
         # on questions like "what's on tomorrow".
-        return f"{self._system}\n\nIt is now {get_time_and_date()} (local time)."
+        return (f"{self._system}\n\nIt is now {get_time_and_date()} (local time); no tool is needed "
+                "for the current time or date.")
 
-    def ask(self, text, follow_up=False):
+    def ask(self, text, follow_up=False, on_text=None):
+        """on_text, if given, is called with each bit of Claude's text as it is written."""
         token = notify.channel.set(self.channel)
         try:
-            return self._ask(text, follow_up)
+            return self._ask(text, follow_up, on_text)
         finally:
             notify.channel.reset(token)
 
-    def _ask(self, text, follow_up):
+    def _ask(self, text, follow_up, on_text):
         """Send the owner's words to Claude, running any tools it calls. Returns the reply.
 
         follow_up means it was heard without the wake word; Claude may then decide it wasn't
@@ -102,10 +107,13 @@ class Brain:
             messages.append({"role": "system", "content": FOLLOW_UP_NOTE})
 
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self._client.messages.create(
-                model=config.CLAUDE_MODEL, max_tokens=config.MAX_TOKENS, system=self._system_now(),
-                tools=tools.SCHEMAS, messages=messages,
-                output_config={"effort": config.CLAUDE_EFFORT}, **_thinking())
+            with self._client.messages.stream(
+                    model=config.CLAUDE_MODEL, max_tokens=config.MAX_TOKENS, system=self._system_now(),
+                    tools=tools.SCHEMAS, messages=messages,
+                    output_config={"effort": config.CLAUDE_EFFORT}, **_thinking()) as stream:
+                for delta in stream.text_stream if on_text else ():
+                    on_text(delta)
+                response = stream.get_final_message()
             u = response.usage
             log.info("claude %s: %d in, %d out, stop=%s", config.CLAUDE_MODEL,
                      u.input_tokens, u.output_tokens, response.stop_reason)
@@ -120,6 +128,8 @@ class Brain:
                     log.warning("reply cut off at max_tokens=%d", config.MAX_TOKENS)
                 break
 
+            if on_text:
+                on_text("\n")  # Claude pauses here for the tools: what it said so far is complete
             # Within a turn, send back the whole response (thinking blocks included) unchanged.
             messages.append({"role": "assistant", "content": response.content})
             results = []
