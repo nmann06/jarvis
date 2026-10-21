@@ -30,6 +30,9 @@ def main():
 
     if not config.VOICE_ENABLED and not config.DISCORD_TOKEN:
         raise SystemExit("Nothing to run: voice is off and DISCORD_TOKEN is not set.")
+    if not config.VOICE_ENABLED:
+        from jarvis import tools
+        tools.warm_up()  # the voice loop does this itself when it runs
     if config.VOICE_ENABLED:
         threading.Thread(target=_voice, name="voice", daemon=True).start()
     if config.DISCORD_TOKEN and not config.DISCORD_OWNER_ID:

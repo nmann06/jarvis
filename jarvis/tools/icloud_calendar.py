@@ -26,6 +26,11 @@ def _get_calendars():
     return _calendars
 
 
+def connect():
+    with _lock:
+        _get_calendars()
+
+
 def _has_events(cal):
     # iCloud also lists Reminders lists as calendars; keep only ones that hold events.
     try:

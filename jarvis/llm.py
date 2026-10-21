@@ -22,9 +22,10 @@ Personality: calm, capable, dry British wit. Address the owner as "sir" now and 
 every reply.
 
 Use your tools for the time, date, calendar, weather, timers, notes and this computer's status rather than \
-guessing. If something can't be done with your tools, say so briefly. Your earlier replies in \
-this conversation already used tools where needed, so trust them. If no tool can do what was \
-asked, say so instead of guessing. Do not include internal or system XML tags in your response."""
+guessing. If something can't be done with your tools, say so briefly. Never repeat an action \
+from an earlier turn (adding an event, setting a timer, saving a note) unless asked to do it \
+again: "say that again" means repeat what you said, not what you did. If no tool can do what \
+was asked, say so instead of guessing. Do not include internal or system XML tags in your response."""
 
 STYLES = {
     "voice": """You are speaking: everything you write is converted to speech, so:
@@ -61,8 +62,11 @@ class Brain:
         self.channel = channel
         self._system = SYSTEM.format(style=STYLES[channel])
         self._client = anthropic.Anthropic()
-        # Finished turns as plain (question, reply) text. Old thinking and tool blocks aren't
-        # replayed, so trimming the oldest turn never invalidates anything still sent.
+        # Finished turns, each a list of messages, oldest dropped first. With thinking off they
+        # keep their tool calls and results, so Claude can see what it already did (otherwise
+        # it may redo an action, like adding the same event twice). With thinking on, only the
+        # question and final reply are kept: thinking blocks are tied to the exact history, so
+        # replaying them after trimming old turns could be rejected.
         self._history = deque(maxlen=config.HISTORY_TURNS)
 
     def ask(self, text, follow_up=False):
@@ -78,10 +82,8 @@ class Brain:
         follow_up means it was heard without the wake word; Claude may then decide it wasn't
         meant for Jarvis, and ask returns None.
         """
-        messages = []
-        for question, reply in self._history:
-            messages += [{"role": "user", "content": question},
-                         {"role": "assistant", "content": reply}]
+        messages = [m for turn in self._history for m in turn]
+        start = len(messages)
         messages.append({"role": "user", "content": text})
         if follow_up:
             # A system message rather than text in the user turn, so it can't read as the owner's words.
@@ -121,7 +123,11 @@ class Brain:
         if follow_up and reply.strip().rstrip(".").upper() == IGNORE:
             return None  # not kept in history either
         reply = reply or "Done."
-        self._history.append((text, reply))
+        if config.CLAUDE_THINKING:
+            turn = [{"role": "user", "content": text}]
+        else:
+            turn = [m for m in messages[start:] if m["role"] != "system"]  # drop the follow-up note
+        self._history.append(turn + [{"role": "assistant", "content": reply}])
         return reply
 
 

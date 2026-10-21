@@ -10,7 +10,7 @@ import time
 import numpy as np
 import sounddevice as sd
 
-from jarvis import audio, config, llm, notify, stt, tts
+from jarvis import audio, config, llm, notify, stt, tools, tts
 from jarvis.wakeword import WakeWord
 
 log = logging.getLogger("jarvis.voice")
@@ -65,6 +65,7 @@ def handle(mic, brain, utterance, follow_up=False):
 
 def run():
     wake, brain = WakeWord(), llm.Brain("voice")
+    tools.warm_up()
     stt.get_model()
     tts.get_voice()
     notify.register("voice", say)

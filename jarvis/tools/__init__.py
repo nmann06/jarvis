@@ -41,5 +41,17 @@ def run(name, args):
         return f"{type(e).__name__}: {e}", True
 
 
+def warm_up():
+    """Log in to slow services now, in the background, so the first request isn't slow."""
+    import threading
+
+    def connect():
+        try:
+            icloud_calendar.connect()
+        except Exception as e:
+            log.warning("calendar not connected yet: %s", e)
+    threading.Thread(target=connect, name="warm-up", daemon=True).start()
+
+
 # Import the tool modules so their @tool decorators run.
 from jarvis.tools import clock, icloud_calendar, notes, system, timers, weather  # noqa: E402,F401
