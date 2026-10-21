@@ -92,9 +92,9 @@ def get_events(start_date, days):
 
 
 def _is_lab(e):
-    # Labs aren't named as such in the Classes calendar; ECE labs are in Beamish-Munro Hall.
-    return e["calendar"] == "Classes" and ("lab" in e["title"].lower()
-                                           or "Beamish-Munro" in (e["location"] or ""))
+    # Labs aren't named as such in the Classes calendar: any ELEC class 3 hours long is one.
+    return (e["calendar"] == "Classes" and e["title"].startswith("ELEC")
+            and isinstance(e["start"], datetime) and e["end"] - e["start"] >= timedelta(hours=3))
 
 
 @tool("Add an event to the owner's Apple Calendar. Can't change or delete existing events. "
