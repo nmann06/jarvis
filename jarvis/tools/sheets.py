@@ -49,13 +49,19 @@ def read_sheet(tab, contains):
                                   range=_tab(tab)).execute().get("values", [])
     if not rows:
         return "That tab is empty."
-    header, out = rows[0], []
-    for number, row in enumerate(rows[1:], start=2):
-        if contains and not any(contains.lower() in str(c).lower() for c in row):
-            continue
-        out.append({"row": number, **{h or _column_letter(i): v
-                                      for i, (h, v) in enumerate(zip(header, row)) if v != ""}})
-    return out[:200] or "No matching rows."
+    header = rows[0]
+    matching = [(n, row) for n, row in enumerate(rows[1:], start=2)
+                if any(c != "" for c in row)
+                and (not contains or any(contains.lower() in str(c).lower() for c in row))]
+    if not matching:
+        return "No matching rows."
+    if len(header) < 2:
+        # A notes page laid out like a document (a title in A1, text below), not a table.
+        lines = [f"{n}: " + " | ".join(c for c in row if c != "") for n, row in matching]
+        return "\n".join([f"Row 1: {header[0] if header else ''}"] + lines[:300])
+    names = lambda i: header[i] if i < len(header) and header[i] else _column_letter(i)
+    return [{"row": n, **{names(i): v for i, v in enumerate(row) if v != ""}}
+            for n, row in matching][:200]
 
 
 @tool("Add a row at the bottom of a tab of the job-search sheet.",
