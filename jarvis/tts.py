@@ -12,6 +12,7 @@ from piper import PiperVoice, SynthesisConfig
 from jarvis import config
 
 _voice = None
+THINKING_AFTER = 0.5  # seconds of silence while waiting before the thinking sound starts
 
 
 def get_voice():
@@ -38,11 +39,26 @@ def speak(text):
     return first - start if first else 0.0
 
 
-def speak_all(texts, stop=None):
+def _thinking_sound(rate):
+    """One loop of the thinking sound: a soft two-note blip every 1.2 seconds."""
+    t = np.arange(int(0.07 * rate)) / rate
+    fade = np.minimum(1, np.minimum(t, t[::-1]) / 0.015)  # gentle edges so it doesn't click
+
+    def note(freq):
+        return np.sin(2 * np.pi * freq * t) * fade
+
+    blip = np.concatenate([note(520), np.zeros(int(0.05 * rate)), note(660)])
+    loop = np.concatenate([blip, np.zeros(int(1.2 * rate) - len(blip))])
+    return (loop * 0.06 * config.TTS_VOLUME * 32767).astype(np.int16)
+
+
+def speak_all(texts, stop=None, thinking=False):
     """Speak each piece of text as it arrives from texts (any iterable, e.g. sentences still
     being written by Claude), blocking until the last is played or the stop event is set.
     Piper works a sentence at a time, so one sentence plays while the next is synthesized.
-    Returns the perf_counter time sound started, or None if nothing was said."""
+    With thinking, a soft sound plays whenever it has been waiting on texts for a moment (Claude
+    thinking, a tool running). Returns the perf_counter time speech started, or None if nothing
+    was said."""
     voice = get_voice()
     syn = SynthesisConfig(length_scale=config.TTS_LENGTH_SCALE, volume=config.TTS_VOLUME)
     chunks = queue.Queue()
@@ -58,15 +74,22 @@ def speak_all(texts, stop=None):
     threading.Thread(target=produce, daemon=True).start()
     first = None
     slice_ = voice.config.sample_rate // 10  # write 100 ms at a time so stop is quick
+    hum = _thinking_sound(voice.config.sample_rate) if thinking else None
+    hum_at, quiet_since = 0, time.perf_counter()
     with sd.OutputStream(samplerate=voice.config.sample_rate, channels=1, dtype="int16",
                          device=config.OUTPUT_DEVICE) as out:
         while not (stop and stop.is_set()):
             try:
                 chunk = chunks.get(timeout=0.1)
             except queue.Empty:
+                if hum is not None and time.perf_counter() - quiet_since >= THINKING_AFTER:
+                    piece = hum[hum_at:hum_at + slice_]
+                    out.write(piece.reshape(-1, 1))
+                    hum_at = (hum_at + len(piece)) % len(hum)
                 continue
             if chunk is None:
                 break
+            hum_at = 0  # the next wait starts the sound from the top
             if first is None:
                 first = time.perf_counter()
             for i in range(0, len(chunk), slice_):
@@ -74,6 +97,7 @@ def speak_all(texts, stop=None):
                     out.abort()  # cut off now rather than playing what's buffered
                     break
                 out.write(chunk[i:i + slice_].reshape(-1, 1))
+            quiet_since = time.perf_counter()
     return first
 
 

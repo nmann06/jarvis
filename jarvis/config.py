@@ -48,6 +48,7 @@ VOSK_MODEL = ROOT / os.getenv("VOSK_MODEL", "models/vosk-model-small-en-us-0.15"
 SAVE_STOP_AUDIO = os.getenv("SAVE_STOP_AUDIO", "") == "1"  # debugging: keep what it heard in data/
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
+THINKING_SOUND = os.getenv("THINKING_SOUND", "on") == "on"  # soft blips while waiting on Claude
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")  # "cuda" or "cpu"
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))

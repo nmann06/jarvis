@@ -148,9 +148,10 @@ def _listen_for_stop(mic, stop, done, saying):
                 w.writeframes(np.concatenate(heard).tobytes())
 
 
-def _speak(mic, texts):
+def _speak(mic, texts, thinking=False):
     """Speak texts (a list, or _Sentences still streaming in), stopping if the owner says stop.
-    Returns (time sound started or None, whether it was stopped)."""
+    thinking plays the thinking sound while waiting on texts. Returns (time speech started or
+    None, whether it was stopped)."""
     stop, done = threading.Event(), threading.Event()
     saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
               else (lambda: " ".join(texts)))
@@ -158,7 +159,7 @@ def _speak(mic, texts):
                                 name="stop", daemon=True)
     listener.start()
     try:
-        return tts.speak_all(texts, stop=stop), stop.is_set()
+        return tts.speak_all(texts, stop=stop, thinking=thinking), stop.is_set()
     finally:
         done.set()
         listener.join()
@@ -197,7 +198,8 @@ def handle(mic, brain, utterance, follow_up=False):
     thinker = threading.Thread(target=think, name="claude", daemon=True)
     with _speaker:
         thinker.start()
-        first, stopped = _speak(mic, sentences)  # speaks while Claude is still writing
+        # Speaks while Claude is still writing, with the thinking sound while it waits.
+        first, stopped = _speak(mic, sentences, thinking=config.THINKING_SOUND)
         if stopped:
             # "Stop" or "cancel": Claude may still be writing, but nobody wants the rest.
             mic.clear()

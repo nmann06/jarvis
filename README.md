@@ -120,6 +120,7 @@ the login command in #jarvis. Quick check: `.venv/bin/python -m jarvis.tools.onq
 | `WHISPER_DEVICE` | `cuda` | `cpu` uses int8 and `WHISPER_THREADS` |
 | `PIPER_VOICE` | `models/piper/en_GB-alan-medium.onnx` | |
 | `TTS_LENGTH_SCALE`, `TTS_VOLUME` | `1.0` | Speech speed (>1 is slower) and loudness |
+| `THINKING_SOUND` | `on` | Soft blips while waiting on Claude or a tool (`off` for silence) |
 | `WAKE_THRESHOLD` | `0.5` | Raise if it wakes by itself, lower if it misses you |
 | `SILENCE_SECONDS` | `0.8` | Pause that ends what you're saying |
 | `FOLLOW_UP_SECONDS` | `5` | How long it listens for a follow-up after replying |
