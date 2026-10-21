@@ -49,6 +49,10 @@ likely meaning.""",
     "discord": """You are chatting with the owner in Discord direct messages. Keep replies short \
 and conversational, like a text message. Light Discord markdown (bold, bullet lists) is fine \
 when it helps; no headings.""",
+    "claude": """These messages come from another Claude assistant that the owner is using on \
+one of their devices, through your MCP connection, not from the owner directly. Reply in plain \
+text with everything it needs to pass on or act on: complete details (dates, times, names, \
+links) rather than a spoken summary. Skip the persona flourishes.""",
 }
 
 CACHE = {"type": "ephemeral"}  # prompt caching, 5-minute lifetime
@@ -79,7 +83,7 @@ class Brain:
         # (cache_control in _ask), so the next one in the conversation reads that prefix back.
         self._system = [{"type": "text", "text": SYSTEM.format(style=STYLES[channel]),
                          "cache_control": CACHE}]
-        self._max_tokens = config.MAX_TOKENS_DISCORD if channel == "discord" else config.MAX_TOKENS
+        self._max_tokens = config.MAX_TOKENS if channel == "voice" else config.MAX_TOKENS_DISCORD
         # Idle connections are normally dropped after 5 s; keep them for a minute, so the one
         # prewarm() opens is still there when the owner finishes talking.
         self._client = anthropic.Anthropic(http_client=anthropic.DefaultHttpxClient(
@@ -119,7 +123,8 @@ class Brain:
     def ask(self, text, follow_up=False, on_text=None, timing=None):
         """on_text, if given, is called with each bit of Claude's text as it is written.
         timing (a latency.Turn), if given, records each request and tool call."""
-        token = notify.channel.set(self.channel)
+        # A Claude session's timers are posted: the owner may be away from the laptop.
+        token = notify.channel.set("discord" if self.channel == "claude" else self.channel)
         try:
             return self._ask(text, follow_up, on_text, timing)
         finally:

@@ -35,7 +35,12 @@ def _serve(server):
                 log.warning("bad alert on %s: %s", config.ALERT_SOCKET, e)
                 continue
         if text:
-            _queue.put(text[:300])
+            say(text)
+
+
+def say(text):
+    """Speak text after anything already queued (posted in Discord if voice is off)."""
+    _queue.put(text[:300])
 
 
 def start():

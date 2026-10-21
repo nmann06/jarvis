@@ -167,6 +167,31 @@ The hook is `deploy/claude-hook.py`, set up in `~/.claude/settings.json` for all
 }
 ```
 
+### Claude sessions talking to Jarvis (any device)
+
+Jarvis is also an MCP server (`jarvis/mcp_server.py`), so Claude on any device (claude.ai on
+the web, the desktop and phone apps, and Claude Code wherever you're signed in) can use it. It
+offers `ask_jarvis` (a message to Jarvis, answered by its own Claude with all its tools; it
+remembers the last `HISTORY_TURNS` messages from Claude sessions), `tell_owner` (spoken aloud
+here, or posted in #jarvis) and every Jarvis tool directly.
+
+It listens on `127.0.0.1:MCP_PORT` (8766) only; Tailscale Funnel gives it a public HTTPS
+address. The secret in the URL is its only key, so keep the URL private.
+
+1. Put a secret in `.env`: `echo "MCP_TOKEN=$(openssl rand -hex 32)" >> .env`, then
+   `systemctl --user restart jarvis` (the log says `mcp server on 127.0.0.1:8766`).
+2. `tailscale funnel --bg 8766` (the first time it may print a link to turn Funnel on for the
+   tailnet; if it says access denied, run `sudo tailscale set --operator=$USER` first).
+   `tailscale funnel status` shows the address, e.g. `https://hyde.tail3c1c60.ts.net`.
+3. claude.ai -> Settings -> Connectors -> Add custom connector: name Jarvis, URL
+   `https://hyde.tail3c1c60.ts.net/mcp/<MCP_TOKEN>`. It then appears in every Claude app and in
+   Claude Code (`/mcp` lists it as `claude.ai Jarvis`). Turn it on per chat in the apps.
+
+Without claude.ai, a Claude Code install can add it by itself:
+`claude mcp add --scope user --transport http jarvis https://hyde.tail3c1c60.ts.net/mcp/<MCP_TOKEN>`.
+To shut it off: `tailscale funnel --bg 8766 off`; to change the key, change `MCP_TOKEN`,
+restart Jarvis, and update the connector's URL.
+
 ## Checks
 
 ```
