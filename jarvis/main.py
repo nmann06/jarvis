@@ -31,6 +31,8 @@ def main():
         raise SystemExit("Nothing to run: voice is off and DISCORD_TOKEN is not set.")
     if config.VOICE_ENABLED:
         threading.Thread(target=_voice, name="voice", daemon=True).start()
+    if config.DISCORD_TOKEN and not config.DISCORD_OWNER_ID:
+        raise SystemExit("DISCORD_TOKEN is set but DISCORD_OWNER_ID isn't")
     if config.DISCORD_TOKEN:
         from jarvis import discord_bot
         discord_bot.run()  # blocks

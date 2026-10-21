@@ -24,7 +24,11 @@ HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "10"))  # past exchanges sent wit
 
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "on") == "on"
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
-DISCORD_OWNER_ID = int(os.getenv("DISCORD_OWNER_ID", "0"))  # the only user the bot answers
+_owner = os.getenv("DISCORD_OWNER_ID", "").strip()
+if _owner and not _owner.isdigit():
+    raise SystemExit(f"DISCORD_OWNER_ID must be your numeric Discord user ID, not {_owner!r} "
+                     "(Developer Mode on, right-click your name, Copy User ID)")
+DISCORD_OWNER_ID = int(_owner or 0)  # the only user the bot answers
 
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
