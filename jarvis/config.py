@@ -37,6 +37,9 @@ ICLOUD_APP_PASSWORD = os.getenv("ICLOUD_APP_PASSWORD", "")  # app-specific passw
 ICLOUD_CALENDAR = os.getenv("ICLOUD_CALENDAR", "Home")  # default calendar for new events
 BRIEFING_HOUR = int(os.getenv("BRIEFING_HOUR", "8"))  # morning briefing posted in #jarvis
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")  # job-search sheet, from its URL
+TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
+TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/authorize
+TRELLO_BOARD = os.getenv("TRELLO_BOARD", "todo")  # main todo board
 
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
