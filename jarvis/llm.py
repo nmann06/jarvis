@@ -50,6 +50,7 @@ when it helps; no headings.""",
 }
 
 MAX_TOOL_ROUNDS = 5  # guard against a tool loop that never ends
+TOOL_MAX_TOKENS = 4000  # room for a long tool call, like an email draft, cut off at the reply limit
 
 IGNORE = "IGNORE"
 FOLLOW_UP_NOTE = f"""This was picked up in the few seconds after your last reply, without the wake \
@@ -107,17 +108,28 @@ class Brain:
             # A system message rather than text in the user turn, so it can't read as the owner's words.
             messages.append({"role": "system", "content": FOLLOW_UP_NOTE})
 
+        max_tokens, speak = self._max_tokens, on_text
         for _ in range(MAX_TOOL_ROUNDS):
             with self._client.messages.stream(
-                    model=config.CLAUDE_MODEL, max_tokens=self._max_tokens, system=self._system_now(),
+                    model=config.CLAUDE_MODEL, max_tokens=max_tokens, system=self._system_now(),
                     tools=tools.SCHEMAS, messages=messages,
                     output_config={"effort": config.CLAUDE_EFFORT}, **_thinking()) as stream:
-                for delta in stream.text_stream if on_text else ():
-                    on_text(delta)
+                for delta in stream.text_stream if speak else ():
+                    speak(delta)
                 response = stream.get_final_message()
             u = response.usage
             log.info("claude %s: %d in, %d out, stop=%s", config.CLAUDE_MODEL,
                      u.input_tokens, u.output_tokens, response.stop_reason)
+
+            if (response.stop_reason == "max_tokens" and response.content
+                    and response.content[-1].type == "tool_use" and max_tokens < TOOL_MAX_TOKENS):
+                # Cut off partway through a tool call, whose input counts as output: the reply
+                # limit is for talk, so ask again with room. What was said is already out loud.
+                log.warning("tool call cut off at max_tokens=%d, retrying with %d",
+                            max_tokens, TOOL_MAX_TOKENS)
+                max_tokens, speak = TOOL_MAX_TOKENS, None
+                continue
+            max_tokens, speak = self._max_tokens, on_text
 
             if response.stop_reason == "refusal":
                 reply = "I'm afraid I can't help with that one, sir."
