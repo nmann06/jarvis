@@ -55,6 +55,26 @@ account.apple.com -> Sign-In and Security -> App-Specific Passwords -> create on
 Apple ID email and that password in `.env` as `ICLOUD_USER` / `ICLOUD_APP_PASSWORD`. New events go
 in `ICLOUD_CALENDAR` (default Home) unless Claude picks a better fit (Work, Classes, ...).
 
+### Google setup (Gmail + Sheets)
+
+Jarvis reads one Gmail inbox (forward your other accounts into it) and can save drafts, never
+send. It also reads and edits the job-search Google Sheet.
+
+1. console.cloud.google.com -> create a project (e.g. "Jarvis").
+2. APIs & Services -> Library: enable **Gmail API** and **Google Sheets API**.
+3. Google Auth Platform (OAuth consent screen): External, app name Jarvis, your email as support
+   and contact. Under Audience add yourself as a test user, then press **Publish app** (stays
+   unverified, which is fine for yourself; in Testing mode the sign-in expires every 7 days).
+4. Clients -> Create client -> **Desktop app** -> download the JSON and save it on this laptop as
+   `~/jarvis/google_client.json`.
+5. Sign in once. From another computer over SSH, forward the login port first:
+   `ssh -L 8765:localhost:8765 <this laptop>`, then run
+   `.venv/bin/python -m jarvis.google_auth`, open the link it prints, and accept the warning
+   ("Google hasn't verified this app" -> Advanced -> Go to Jarvis). The token is saved to
+   `.google_token.json` and renews itself.
+6. Put the sheet's ID (the part of its URL between `/d/` and `/edit`) in `.env` as
+   `GOOGLE_SHEET_ID`, then `systemctl --user restart jarvis`.
+
 ### Discord setup
 
 1. discord.com/developers/applications -> New Application -> Bot -> Reset Token; put it in `.env`
