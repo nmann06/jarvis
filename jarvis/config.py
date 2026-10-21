@@ -36,7 +36,12 @@ DISCORD_MENTION = os.getenv("DISCORD_MENTION", "on") == "on"  # @mention the own
 ALERT_SOCKET = Path(os.getenv("ALERT_SOCKET") or
                     Path(os.getenv("XDG_RUNTIME_DIR") or "/tmp") / "jarvis.sock")
 
-ICLOUD_USER = os.getenv("ICLOUD_USER", "")  # Apple ID email
+# Jarvis as an MCP server for Claude sessions on other devices (jarvis/mcp_server.py): the
+# secret in its URL, and the local port Tailscale Funnel forwards to. No token, no server.
+MCP_TOKEN = os.getenv("MCP_TOKEN", "")
+MCP_PORT = int(os.getenv("MCP_PORT", "8766"))
+
+ICLOUD_USER =os.getenv("ICLOUD_USER", "")  # Apple ID email
 ICLOUD_APP_PASSWORD = os.getenv("ICLOUD_APP_PASSWORD", "")  # app-specific password, not the real one
 ICLOUD_CALENDAR = os.getenv("ICLOUD_CALENDAR", "Home")  # default calendar for new events
 BRIEFING_HOUR = int(os.getenv("BRIEFING_HOUR", "8"))  # morning briefing posted in #jarvis
