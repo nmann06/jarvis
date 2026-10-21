@@ -10,6 +10,49 @@ machine itself; only the text of what you say is sent to Claude.
 | Brain | Claude via the `anthropic` SDK (`claude-haiku-5-5` by default) |
 | Microphone | A USB webcam mic |
 
+## Speed
+
+From you going quiet to Jarvis's voice takes about 1.5-1.8 s for a plain question and 2.5-3 s
+when Claude needs a tool (measured on this laptop). What keeps it there, in the order it happens:
+
+- **A short pause when you're done.** A request that sounds finished (Whisper ends it with `.`,
+  `?` or `!`, and not on a word like "to", "and" or "um") ends after 0.5 s of quiet
+  (`QUICK_SILENCE_SECONDS`); anything else waits 0.8 s (`SILENCE_SECONDS`).
+- **Transcription during that pause.** Whisper starts 0.24 s into any pause, so the text is ready
+  when the pause turns out to be the end: its 0.27 s (nearly the same for any length, as it
+  always encodes a 30 s window) usually adds nothing. It is warmed up at startup, since its
+  first run is 0.2 s slower.
+- **Prompt caching.** The system prompt and tools never change (the time goes in a system message
+  after your words), so they're cached, and each request caches the conversation for the next.
+  On "Hey Jarvis" a `max_tokens=0` request loads the conversation so far into the cache while
+  you're still talking: Claude's first word comes 0.65-0.9 s after the request instead of about
+  0.95 s (up to 1.35 s). Having the time there also saves a tool call to look it up.
+- **A connection kept open.** Idle connections to the API are kept for 60 s rather than 5, so the
+  request reuses the one the pre-warm opened.
+- **Speaking while Claude writes.** Speech starts with the first sentence (Piper takes 0.03-0.23 s
+  for it) while Claude writes the rest, and words said before a tool call ("Checking your
+  calendar.") are spoken as soon as the call starts.
+- **Faster tools.** Email search fetches the messages in one batched request (2.5 s -> 0.6 s for
+  ten), OnQ due work asks for every course at once (1.5-2.5 s -> 0.3-0.4 s), and calendar
+  queries go to every calendar at once.
+
+### Where the time goes
+
+Every voice turn logs one line whose parts add up to the total, and `data/latency.jsonl` gets
+the full record (each Claude request with its token counts, each tool, what was heard and said):
+
+```
+latency 2.82s: pause 0.56 + stt 0.00 + claude#1 0.74 + get_weather 0.47 + claude#2 0.66
+  + sentence 0.18 + voice 0.17 + audio 0.04 [answered; quick end; stt 0.28s, all in the pause;
+  claude#1 5080 cached + 56 new in, 27 out; claude#2 5134 cached + 125 new in, 61 out]
+```
+
+`pause` is making sure you'd finished, `stt` transcription not already done during the pause,
+`claude` a request from sending it to the first word (`claude#1`, `claude#2` when tools are
+involved, with each tool's time between), `sentence` Claude finishing the first sentence,
+`voice` Piper and `audio` the sound card. `.venv/bin/python -m jarvis.latency 30` prints the last
+30 turns and the median of each part.
+
 ## Setup
 
 ```
@@ -31,6 +74,7 @@ the Discord bot; both share the same tools.
 ```
 systemctl --user status jarvis          # is it running?
 journalctl --user -u jarvis -f          # live logs, including per-turn latency
+.venv/bin/python -m jarvis.latency 30   # last 30 voice turns: where the time went, and medians
 systemctl --user restart jarvis         # after changing .env or code
 systemctl --user stop jarvis            # stop it (e.g. to run a test that needs the mic)
 ```
@@ -123,15 +167,9 @@ the login command in #jarvis. Quick check: `.venv/bin/python -m jarvis.tools.onq
 | `THINKING_SOUND` | `on` | Soft blips while waiting on Claude or a tool (`off` for silence) |
 | `WAKE_THRESHOLD` | `0.5` | Raise if it wakes by itself, lower if it misses you |
 | `SILENCE_SECONDS` | `0.8` | Pause that ends what you're saying |
+| `QUICK_SILENCE_SECONDS` | `0.5` | Shorter pause that ends it when it's already a finished sentence ("What time is it?"); set to `SILENCE_SECONDS` to always wait the full pause |
 | `FOLLOW_UP_SECONDS` | `5` | How long it listens for a follow-up after replying |
 | `INPUT_DEVICE`, `OUTPUT_DEVICE` | system default | Index or name substring; list with `python -m sounddevice` |
-
-## Measured on this machine
-
-- Whisper `large-v3-turbo` on GPU: 0.15 s per second of audio (CPU `base.en`: 0.24 s, and less accurate).
-- Claude `claude-haiku-5-5`: about 0.9 s per request; a question needing a tool takes two (1.5-2 s).
-- Piper: about 0.13 s to synthesize a one-sentence reply.
-- End of speech to Jarvis's voice (simulated audio): 2.7-3.3 s, of which 0.8 s is the silence wait.
 
 ## Status
 

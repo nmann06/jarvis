@@ -52,13 +52,15 @@ def _thinking_sound(rate):
     return (loop * 0.06 * config.TTS_VOLUME * 32767).astype(np.int16)
 
 
-def speak_all(texts, stop=None, thinking=False, played=None):
+def speak_all(texts, stop=None, thinking=False, played=None, timing=None):
     """Speak each piece of text as it arrives from texts (any iterable, e.g. sentences still
     being written by Claude), blocking until the last is played or the stop event is set.
     Piper works a sentence at a time, so one sentence plays while the next is synthesized.
     With thinking, a soft sound plays whenever it has been waiting on texts for a moment (Claude
     thinking, a tool running). If played is a list, each text is added to it as it starts
-    playing. Returns the perf_counter time speech started, or None if nothing was said."""
+    playing. timing (a latency.Turn), if given, is told when the first text came in ("text"),
+    its first audio was ready ("synth") and should reach the speaker ("sound"). Returns the
+    perf_counter time speech started, or None if nothing was said."""
     voice = get_voice()
     syn = SynthesisConfig(length_scale=config.TTS_LENGTH_SCALE, volume=config.TTS_VOLUME)
     chunks = queue.Queue()
@@ -66,7 +68,11 @@ def speak_all(texts, stop=None, thinking=False, played=None):
     def produce():
         try:
             for text in texts:
+                if timing:
+                    timing.mark("text")
                 for c in voice.synthesize(text, syn_config=syn):
+                    if timing:
+                        timing.mark("synth")
                     chunks.put((text, c.audio_int16_array))
         finally:
             chunks.put(None)
@@ -95,6 +101,8 @@ def speak_all(texts, stop=None, thinking=False, played=None):
             hum_at = 0  # the next wait starts the sound from the top
             if first is None:
                 first = time.perf_counter()
+                if timing:  # the sound card's buffer holds it back by about out.latency
+                    timing.mark("sound", first + out.latency)
             for i in range(0, len(chunk), slice_):
                 if stop and stop.is_set():
                     out.abort()  # cut off now rather than playing what's buffered

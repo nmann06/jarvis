@@ -19,6 +19,7 @@ import logging
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -48,6 +49,8 @@ class LoginNeeded(RuntimeError):
 
 _http = requests.Session()
 _lock = threading.Lock()
+_renewals = 0  # sessions got so far: tells a thread whether another has already renewed it
+_refused = 0.0  # when renewing last needed a real login (monotonic), so others don't retry it
 _warned = False  # posted "please log in" since the last good session
 _agent = None  # the browser's normal user agent, without "Headless"
 
@@ -135,30 +138,44 @@ def _warn():
 
 def _get(path, raw=False, **params):
     """GET an API path (JSON, or the response itself if raw), renewing the session once if it
-    has expired."""
-    with _lock:
-        if not _http.cookies:
-            _use(_stored())
-        for attempt in range(2):
-            if attempt or not _http.cookies:
+    has expired. Threads can call it at once: the requests run in parallel, and an expired
+    session is renewed by the first thread to find it so; the others then use the new one."""
+    global _renewals, _refused
+    expired, renewed = None, False  # the session this call found expired; whether it renewed
+    for _ in range(3):
+        with _lock:
+            if not _http.cookies:
+                _use(_stored())
+            if expired == _renewals or not _http.cookies:
+                if renewed:
+                    break  # the renewed session was refused too
+                if time.monotonic() - _refused < 10:  # another thread has just tried
+                    raise LoginNeeded("OnQ needs a fresh login")
                 try:
                     _refresh()
                 except LoginNeeded:
+                    _refused = time.monotonic()
                     _warn()
                     raise
-            r = _http.get(HOST + path, params=params, timeout=20, allow_redirects=False)
-            if r.status_code in (401, 403) or r.is_redirect:
-                # Expired session, or just something the owner can't see?
-                me = _http.get(f"{HOST}/d2l/api/lp/{LP}/users/whoami", timeout=20, allow_redirects=False)
-                if me.status_code != 200:
-                    continue
-            if r.cookies:  # keep D2L's renewed cookies for the next restart
+                _renewals, renewed = _renewals + 1, True
+            session = _renewals
+        r = _http.get(HOST + path, params=params, timeout=20, allow_redirects=False)
+        if r.status_code in (401, 403) or r.is_redirect:
+            if session != _renewals:
+                continue  # renewed while this request was out: try again with the new session
+            # Expired session, or just something the owner can't see?
+            me = _http.get(f"{HOST}/d2l/api/lp/{LP}/users/whoami", timeout=20, allow_redirects=False)
+            if me.status_code != 200:
+                expired = session
+                continue
+        if r.cookies:  # keep D2L's renewed cookies for the next restart
+            with _lock:
                 _store([c for c in _stored() if c["name"] not in r.cookies]
                        + [{"name": c.name, "value": c.value, "domain": c.domain, "path": c.path,
                            "expires": c.expires or -1, "httpOnly": True, "secure": c.secure,
                            "sameSite": "Lax"} for c in r.cookies])
-            r.raise_for_status()
-            return r if raw else r.json()
+        r.raise_for_status()
+        return r if raw else r.json()
     _warn()
     raise LoginNeeded("OnQ refused the renewed session")
 
@@ -261,22 +278,30 @@ def due_items(start, end):
                           "title": title.strip(), "when": when,
                           "kind": kind, "id": f"{course['id']}/{key}", "folder": folder}
 
-    for c in courses():
+    def lists(c):
         base = f"/d2l/api/le/{LE}/{c['id']}"
-        for f in _maybe(base + "/dropbox/folders/") or []:
-            add(c, f"dropbox{f['Id']}", f["Name"], f.get("DueDate"), "assignment", f["Id"])
-        for q in (_maybe(base + "/quizzes/") or {}).get("Objects", []):
-            add(c, f"quiz{q['QuizId']}", q["Name"], q.get("DueDate") or q.get("EndDate"), "quiz")
-        for ev in _maybe(base + "/calendar/events/") or []:
-            linked = ev.get("AssociatedEntity") or {}
-            if "Dropbox" in (linked.get("AssociatedEntityType") or ""):
-                continue  # the folder itself is already listed
-            add(c, f"event{ev['CalendarEventId']}", ev["Title"],
-                ev.get("StartDateTime") or ev.get("EndDateTime"), "event")
-    found = sorted(items.values(), key=lambda i: i["when"])
-    for i in found:
-        folder = i.pop("folder")
-        i["submitted"] = _submitted(i["id"].split("/")[0], folder) if folder else None
+        return [pool.submit(_maybe, base + path)
+                for path in ("/dropbox/folders/", "/quizzes/", "/calendar/events/")]
+
+    # All of it at once: one request after another (about 20) took 1.5-2.5 s.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for c, (folders, quizzes, events) in [(c, lists(c)) for c in courses()]:
+            for f in folders.result() or []:
+                add(c, f"dropbox{f['Id']}", f["Name"], f.get("DueDate"), "assignment", f["Id"])
+            for q in (quizzes.result() or {}).get("Objects", []):
+                add(c, f"quiz{q['QuizId']}", q["Name"], q.get("DueDate") or q.get("EndDate"), "quiz")
+            for ev in events.result() or []:
+                linked = ev.get("AssociatedEntity") or {}
+                if "Dropbox" in (linked.get("AssociatedEntityType") or ""):
+                    continue  # the folder itself is already listed
+                add(c, f"event{ev['CalendarEventId']}", ev["Title"],
+                    ev.get("StartDateTime") or ev.get("EndDateTime"), "event")
+        found = sorted(items.values(), key=lambda i: i["when"])
+        checks = [pool.submit(_submitted, i["id"].split("/")[0], i["folder"]) if i["folder"]
+                  else None for i in found]
+        for i, check in zip(found, checks):
+            del i["folder"]
+            i["submitted"] = check.result() if check else None
     return found
 
 

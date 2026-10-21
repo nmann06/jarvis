@@ -57,11 +57,25 @@ def search_email(query, max_results):
     gmail = _gmail()
     found = gmail.users().messages().list(userId="me", q=query or "in:inbox",
                                           maxResults=max_results).execute()
-    results = []
-    for ref in found.get("messages", []):
-        msg = gmail.users().messages().get(
+    refs = found.get("messages", [])
+    got = {}  # position -> message, or the error fetching it
+
+    def keep(request_id, msg, error):
+        got[int(request_id)] = error or msg
+
+    # All the messages in one batched HTTP request: one request each took 2.5 s for ten.
+    batch = gmail.new_batch_http_request(callback=keep)
+    for i, ref in enumerate(refs):
+        batch.add(gmail.users().messages().get(
             userId="me", id=ref["id"], format="metadata",
-            metadataHeaders=["From", "To", "Subject", "Date"]).execute()
+            metadataHeaders=["From", "To", "Subject", "Date"]), request_id=str(i))
+    if refs:
+        batch.execute()
+    results = []
+    for i in range(len(refs)):
+        msg = got[i]
+        if isinstance(msg, Exception):
+            raise msg
         h = _headers(msg)
         results.append({"id": msg["id"], "from": h.get("from"), "to": h.get("to"),
                         "subject": h.get("subject"), "date": h.get("date"),

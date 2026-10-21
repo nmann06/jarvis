@@ -44,6 +44,14 @@ def get_model():
     return _model
 
 
+def warm_up():
+    """Run the model once on silence: the first transcription after loading is otherwise about
+    0.2 s slower (CUDA setting itself up), which would come out of the first reply."""
+    segments, _ = get_model().transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), language="en",
+                                         beam_size=1, vad_filter=False)
+    list(segments)
+
+
 def transcribe(audio):
     """Transcribe float32 mono 16 kHz samples (or a path to an audio file) to text."""
     # vad_filter skips non-speech audio first; otherwise Whisper invents words like "You" on silence.

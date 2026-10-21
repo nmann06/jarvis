@@ -51,16 +51,15 @@ if __name__ == "__main__":
                 score = wake.wait(mic)
                 woke = time.perf_counter()
                 print(f"WAKE (score {score:.2f})", flush=True)
-                utterance = audio.record_utterance(mic, preroll=wake.preroll)
+                utterance = audio.record_utterance(mic, stt.transcribe, preroll=wake.preroll)
                 if utterance is None:
                     print("  (no speech after wake word)", flush=True)
                     continue
-                ended = time.perf_counter()
-                text = stt.transcribe(utterance)
-                print(f"  utterance {len(utterance) / audio.SAMPLE_RATE:.1f}s, "
-                      f"recorded in {ended - woke:.1f}s, transcribed in "
-                      f"{time.perf_counter() - ended:.2f}s, peak {np.abs(utterance).max():.2f}",
-                      flush=True)
+                text, _, _ = utterance.transcribe()
+                print(f"  utterance {utterance.seconds:.1f}s, recorded in "
+                      f"{utterance.ended - woke:.1f}s ({utterance.endpoint} end), text ready "
+                      f"{time.perf_counter() - utterance.ended:.2f}s after, "
+                      f"peak {np.abs(utterance.audio).max():.2f}", flush=True)
                 print(f"  > {text}", flush=True)
         except KeyboardInterrupt:
             pass

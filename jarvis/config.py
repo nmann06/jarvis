@@ -55,6 +55,9 @@ WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
 WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))  # 0-1; higher = fewer false wakes
 SPEECH_THRESHOLD = float(os.getenv("SPEECH_THRESHOLD", "0.5"))  # Silero VAD speech probability
 SILENCE_SECONDS = float(os.getenv("SILENCE_SECONDS", "0.8"))  # pause that ends an utterance
+# Shorter pause that ends it when the words so far are a finished sentence ("What time is
+# it?"); set it to SILENCE_SECONDS to always wait the full pause.
+QUICK_SILENCE_SECONDS = float(os.getenv("QUICK_SILENCE_SECONDS", "0.5"))
 FOLLOW_UP_SECONDS = float(os.getenv("FOLLOW_UP_SECONDS", "5"))  # listen again after a reply
 MAX_UTTERANCE_SECONDS = float(os.getenv("MAX_UTTERANCE_SECONDS", "15"))
 OUTPUT_DEVICE =_device(os.getenv("OUTPUT_DEVICE", ""))

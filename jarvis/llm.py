@@ -5,9 +5,11 @@ Run: python -m jarvis.llm "What's the weather like?"  to ask one question from t
 
 import logging
 import sys
+import time
 from collections import deque
 
 import anthropic
+import httpx2
 
 from jarvis import config, notify, tools
 from jarvis.tools.clock import get_time_and_date
@@ -49,6 +51,7 @@ and conversational, like a text message. Light Discord markdown (bold, bullet li
 when it helps; no headings.""",
 }
 
+CACHE = {"type": "ephemeral"}  # prompt caching, 5-minute lifetime
 MAX_TOOL_ROUNDS = 5  # guard against a tool loop that never ends
 TOOL_MAX_TOKENS = 8000  # room for a long tool call (a note, an email draft) cut off at the reply limit
 
@@ -71,9 +74,17 @@ class Brain:
 
     def __init__(self, channel="voice"):
         self.channel = channel
-        self._system = SYSTEM.format(style=STYLES[channel])
+        # The system prompt never changes (the time goes in each turn instead), so it is cached
+        # along with the tools ahead of it. Each request also caches itself as a whole
+        # (cache_control in _ask), so the next one in the conversation reads that prefix back.
+        self._system = [{"type": "text", "text": SYSTEM.format(style=STYLES[channel]),
+                         "cache_control": CACHE}]
         self._max_tokens = config.MAX_TOKENS_DISCORD if channel == "discord" else config.MAX_TOKENS
-        self._client = anthropic.Anthropic()
+        # Idle connections are normally dropped after 5 s; keep them for a minute, so the one
+        # prewarm() opens is still there when the owner finishes talking.
+        self._client = anthropic.Anthropic(http_client=anthropic.DefaultHttpxClient(
+            limits=httpx2.Limits(max_connections=1000, max_keepalive_connections=100,
+                                 keepalive_expiry=60)))
         # Finished turns, each a list of messages, oldest dropped first. With thinking off they
         # keep their tool calls and results, so Claude can see what it already did (otherwise
         # it may redo an action, like adding the same event twice). With thinking on, only the
@@ -81,21 +92,40 @@ class Brain:
         # replaying them after trimming old turns could be rejected.
         self._history = deque(maxlen=config.HISTORY_TURNS)
 
-    def _system_now(self):
-        # The time and date up front saves a get_time_and_date round trip (about a second)
-        # on questions like "what's on tomorrow".
-        return (f"{self._system}\n\nIt is now {get_time_and_date()} (local time); no tool is needed "
-                "for the current time or date.")
+    def prewarm(self):
+        """Have the API read the conversation so far into its cache while the owner is still
+        talking, so the real request has only their new words left to read and its first word
+        comes sooner. max_tokens=0: nothing is written back. The cache lasts 5 minutes."""
+        messages = [m for turn in self._history for m in turn]
+        if messages:  # cache up to the end of the last reply, which is always plain text
+            last = messages[-1]
+            messages[-1] = {**last, "content": [{"type": "text", "text": last["content"],
+                                                 "cache_control": CACHE}]}
+        messages.append({"role": "user", "content": "(warming up)"})  # needed, never answered
+        start = time.perf_counter()
+        try:
+            response = self._client.messages.create(
+                model=config.CLAUDE_MODEL, max_tokens=0, system=self._system,
+                tools=tools.SCHEMAS, messages=messages,
+                output_config={"effort": config.CLAUDE_EFFORT}, **_thinking())
+        except anthropic.APIError as e:
+            log.warning("couldn't warm the cache: %s", e)
+            return
+        u = response.usage
+        log.info("cache warmed in %.2fs: %d tokens already cached, %d added",
+                 time.perf_counter() - start, u.cache_read_input_tokens or 0,
+                 u.cache_creation_input_tokens or 0)
 
-    def ask(self, text, follow_up=False, on_text=None):
-        """on_text, if given, is called with each bit of Claude's text as it is written."""
+    def ask(self, text, follow_up=False, on_text=None, timing=None):
+        """on_text, if given, is called with each bit of Claude's text as it is written.
+        timing (a latency.Turn), if given, records each request and tool call."""
         token = notify.channel.set(self.channel)
         try:
-            return self._ask(text, follow_up, on_text)
+            return self._ask(text, follow_up, on_text, timing)
         finally:
             notify.channel.reset(token)
 
-    def _ask(self, text, follow_up, on_text):
+    def _ask(self, text, follow_up, on_text, timing):
         """Send the owner's words to Claude, running any tools it calls. Returns the reply.
 
         follow_up means it was heard without the wake word; Claude may then decide it wasn't
@@ -104,22 +134,41 @@ class Brain:
         messages = [m for turn in self._history for m in turn]
         start = len(messages)
         messages.append({"role": "user", "content": text})
+        # The time up front saves a get_time_and_date round trip (about a second) on questions
+        # like "what's on tomorrow". It goes after the owner's words, not in the system prompt,
+        # so everything before them stays cached. A system message rather than text in the
+        # user turn, so it (and the follow-up note) can't read as the owner's words.
+        note = (f"It is now {get_time_and_date()} (local time); no tool is needed for the "
+                "current time or date.")
         if follow_up:
-            # A system message rather than text in the user turn, so it can't read as the owner's words.
-            messages.append({"role": "system", "content": FOLLOW_UP_NOTE})
+            note += "\n\n" + FOLLOW_UP_NOTE
+        messages.append({"role": "system", "content": note})
 
         max_tokens, speak = self._max_tokens, on_text
         for _ in range(MAX_TOOL_ROUNDS):
+            request = timing.claude() if timing else {}
             with self._client.messages.stream(
-                    model=config.CLAUDE_MODEL, max_tokens=max_tokens, system=self._system_now(),
-                    tools=tools.SCHEMAS, messages=messages,
+                    model=config.CLAUDE_MODEL, max_tokens=max_tokens, system=self._system,
+                    tools=tools.SCHEMAS, messages=messages, cache_control=CACHE,
                     output_config={"effort": config.CLAUDE_EFFORT}, **_thinking()) as stream:
-                for delta in stream.text_stream if speak else ():
-                    speak(delta)
+                for event in stream:
+                    if event.type == "content_block_start" and event.content_block.type == "tool_use":
+                        if speak:  # what it said first ("Checking your calendar.") is complete
+                            speak("\n")
+                    elif event.type == "content_block_delta":
+                        request.setdefault("first_token", time.perf_counter())
+                        if event.delta.type == "text_delta":
+                            request.setdefault("first_text", time.perf_counter())
+                            if speak:
+                                speak(event.delta.text)
                 response = stream.get_final_message()
             u = response.usage
-            log.info("claude %s: %d in, %d out, stop=%s", config.CLAUDE_MODEL,
-                     u.input_tokens, u.output_tokens, response.stop_reason)
+            request.update(done=time.perf_counter(), stop=response.stop_reason, out=u.output_tokens,
+                           **{"in": u.input_tokens, "cached": u.cache_read_input_tokens or 0,
+                              "written": u.cache_creation_input_tokens or 0})
+            log.info("claude %s: %d in (%d from cache), %d out, stop=%s", config.CLAUDE_MODEL,
+                     u.input_tokens + request["cached"] + request["written"], request["cached"],
+                     u.output_tokens, response.stop_reason)
 
             if (response.stop_reason == "max_tokens" and response.content
                     and response.content[-1].type == "tool_use" and max_tokens < TOOL_MAX_TOKENS):
@@ -147,7 +196,10 @@ class Brain:
             messages.append({"role": "assistant", "content": response.content})
             results = []
             for call in calls:
+                started = time.perf_counter()
                 result, is_error = tools.run(call.name, call.input)
+                if timing:
+                    timing.tool(call.name, started, time.perf_counter(), is_error)
                 log.info("tool %s(%s) -> %s", call.name, call.input, result[:200])
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": result, "is_error": is_error})
@@ -158,10 +210,9 @@ class Brain:
         if follow_up and reply.strip().rstrip(".").upper() == IGNORE:
             return None  # not kept in history either
         reply = reply or "Done."
-        if config.CLAUDE_THINKING:
-            turn = [{"role": "user", "content": text}]
-        else:
-            turn = [m for m in messages[start:] if m["role"] != "system"]  # drop the follow-up note
+        # Kept as sent, time note included, so the next request begins with this one's cached
+        # prefix (with thinking on, only the question and its note are kept: see __init__).
+        turn = messages[start:start + 2] if config.CLAUDE_THINKING else messages[start:]
         self._history.append(turn + [{"role": "assistant", "content": reply}])
         return reply
 

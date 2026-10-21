@@ -1,6 +1,6 @@
 """Voice front end: wake word -> chime -> record -> transcribe -> Claude -> speak -> follow-up.
 
-Started by jarvis.main. Each turn logs how long every stage took.
+Started by jarvis.main. Each turn logs where its time went (jarvis.latency).
 """
 
 import json
@@ -14,7 +14,7 @@ import wave
 import numpy as np
 import sounddevice as sd
 
-from jarvis import audio, config, llm, notify, stt, tools, tts
+from jarvis import audio, config, latency, llm, notify, stt, tools, tts
 from jarvis.wakeword import WakeWord
 
 log = logging.getLogger("jarvis.voice")
@@ -168,10 +168,11 @@ def _listen_for_stop(mic, stop, done, saying):
 _unfinished = None  # (texts, index of the sentence cut off) after "stop", for "continue"
 
 
-def _speak(mic, texts, thinking=False):
+def _speak(mic, texts, thinking=False, timing=None):
     """Speak texts (a list, or _Sentences still streaming in), stopping if the owner says stop.
-    thinking plays the thinking sound while waiting on texts. Returns (time speech started or
-    None, whether it was stopped). When stopped, remembers where, so "continue" can resume."""
+    thinking plays the thinking sound while waiting on texts; timing is a latency.Turn. Returns
+    (time speech started or None, whether it was stopped). When stopped, remembers where, so
+    "continue" can resume."""
     global _unfinished
     stop, done = threading.Event(), threading.Event()
     saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
@@ -181,7 +182,7 @@ def _speak(mic, texts, thinking=False):
     listener.start()
     try:
         played = []
-        first = tts.speak_all(texts, stop=stop, thinking=thinking, played=played)
+        first = tts.speak_all(texts, stop=stop, thinking=thinking, played=played, timing=timing)
         if stop.is_set():
             _unfinished = (texts, max(len(played) - 1, 0))
         return first, stop.is_set()
@@ -193,7 +194,7 @@ def _speak(mic, texts, thinking=False):
 _last_reply = None
 
 
-def _continue(mic):
+def _continue(mic, timing):
     """Say the rest of a reply that was cut off, from the start of the sentence it stopped in."""
     global _last_reply, _unfinished
     texts, start = _unfinished
@@ -204,7 +205,7 @@ def _continue(mic):
     rest = texts[start:]
     log.info("continuing: %s", " ".join(rest))
     with _speaker:
-        _, stopped = _speak(mic, rest)
+        _, stopped = _speak(mic, rest, timing=timing)
     if stopped:  # _speak remembered the new place within rest; make it within the whole reply
         _unfinished = (texts, start + _unfinished[1])
         mic.clear()
@@ -216,63 +217,72 @@ def _continue(mic):
 
 def handle(mic, brain, utterance, follow_up=False):
     """Transcribe, ask Claude, speak. Returns False if there was nothing to answer."""
+    turn = latency.Turn(utterance, follow_up)
+    try:
+        return _answer(mic, brain, utterance, follow_up, turn)
+    finally:
+        turn.finish()  # logs where the time went
+
+
+def _answer(mic, brain, utterance, follow_up, turn):
     global _last_reply, _unfinished
-    t0 = time.perf_counter()
-    text = stt.transcribe(utterance)
-    t1 = time.perf_counter()
+    text, started, finished = utterance.transcribe()  # usually done during the pause already
+    turn.transcribed(text, started, finished)
     if not text:
-        log.info("heard nothing intelligible (%.1fs of audio)", len(utterance) / audio.SAMPLE_RATE)
+        log.info("heard nothing intelligible (%.1fs of audio)", utterance.seconds)
+        turn.outcome = "nothing heard"
         return False
     log.info("you: %s", text)
     if _last_reply and is_repeat_request(text):
         log.info("repeating last reply (local, no Claude)")
         with _speaker:
-            _, stopped = _speak(mic, [_last_reply])
+            _, stopped = _speak(mic, [_last_reply], timing=turn)
         mic.clear()
+        turn.reply, turn.outcome = _last_reply, "stopped" if stopped else "repeated"
         return not stopped
     if _unfinished and is_continue_request(text):
-        return _continue(mic)
+        done = _continue(mic, turn)
+        turn.outcome = "continued" if done else "stopped"
+        return done
     _unfinished = None  # a new request: whatever was cut off before is dropped
     sentences, result = _Sentences(), {}
 
     def think():
         try:
-            result["reply"] = brain.ask(text, follow_up=follow_up, on_text=sentences.add)
+            result["reply"] = brain.ask(text, follow_up=follow_up, on_text=sentences.add,
+                                        timing=turn)
         except Exception as e:
             result["error"] = e
         finally:
-            result["done"] = time.perf_counter()
             sentences.close()
 
     thinker = threading.Thread(target=think, name="claude", daemon=True)
     with _speaker:
         thinker.start()
         # Speaks while Claude is still writing, with the thinking sound while it waits.
-        first, stopped = _speak(mic, sentences, thinking=config.THINKING_SOUND)
+        _, stopped = _speak(mic, sentences, thinking=config.THINKING_SOUND, timing=turn)
         if stopped:
             # "Stop" or "cancel": Claude may still be writing, but nobody wants the rest.
             mic.clear()
+            turn.outcome = "stopped"
             return False
         thinker.join()
         if "error" in result:
             raise result["error"]
         reply = result["reply"]
         if reply is None and not sentences.spoken:
-            log.info("not meant for me, back to idle (claude %.2fs)", result["done"] - t1)
+            log.info("not meant for me, back to idle")
+            turn.outcome = "ignored"
             return False
         if not sentences.spoken:  # a reply that wasn't streamed, e.g. after a refusal
-            start = time.perf_counter()
-            _, stopped = _speak(mic, [reply])
-            first = start
+            _, stopped = _speak(mic, [reply], timing=turn)
             if stopped:
                 mic.clear()
+                turn.outcome = "stopped"
                 return False
-    _last_reply = " ".join(sentences.spoken) or reply
+    _last_reply = turn.reply = " ".join(sentences.spoken) or reply
+    turn.outcome = "answered"
     log.info("jarvis: %s", _last_reply)
-    # Recording only stops after SILENCE_SECONDS of quiet, so that's part of the wait too.
-    log.info("latency: silence %.2fs + stt %.2fs + claude to first word %.2fs = %.2fs from end "
-             "of speech to voice (claude finished after %.2fs)", config.SILENCE_SECONDS, t1 - t0,
-             first - t1, config.SILENCE_SECONDS + first - t0, result["done"] - t1)
     mic.clear()  # drop Jarvis's own voice picked up by the mic
     return True
 
@@ -280,7 +290,7 @@ def handle(mic, brain, utterance, follow_up=False):
 def run():
     wake, brain = WakeWord(), llm.Brain("voice")
     tools.warm_up()
-    stt.get_model()
+    stt.warm_up()
     tts.get_voice()
     _stop_recognizer()
     notify.register("voice", say)
@@ -289,13 +299,18 @@ def run():
         while True:
             score = wake.wait(mic)
             log.info("wake (score %.2f)", score)
+            # While the owner talks, get Claude's cache ready for the conversation so far.
+            threading.Thread(target=brain.prewarm, name="prewarm", daemon=True).start()
             play(CHIME)
-            utterance = audio.record_utterance(mic, preroll=wake.preroll)
+            utterance = audio.record_utterance(mic, stt.transcribe, preroll=wake.preroll)
+            if utterance is None:
+                log.info("no request after the wake word")
             follow_up = False
             # Follow-up window: after a reply, listen again without needing the wake word.
             # Claude decides whether what it hears there was meant for Jarvis.
             while utterance is not None and handle(mic, brain, utterance, follow_up):
-                utterance = audio.record_utterance(mic, wait_seconds=config.FOLLOW_UP_SECONDS)
+                utterance = audio.record_utterance(mic, stt.transcribe,
+                                                   wait_seconds=config.FOLLOW_UP_SECONDS)
                 follow_up = True
             play(END_CHIME)
             mic.clear()
