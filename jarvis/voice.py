@@ -151,6 +151,10 @@ def _listen_for_stop(mic, stop, done, saying):
                 text = json.loads(rec.Result())["text"]
             else:
                 text = json.loads(rec.PartialResult())["partial"]
+                if text in STOP_PHRASES:
+                    # A partial "stop" is usually echo or noise that Vosk drops once it decodes
+                    # the whole utterance, so make it decide now (this also starts a new one).
+                    text = json.loads(rec.FinalResult())["text"]
             if text in STOP_PHRASES:
                 # The canceller lets some echo through, mostly as a reply starts, so Jarvis
                 # saying "stop by the office" could otherwise stop itself.
