@@ -15,11 +15,13 @@ from jarvis import config
 
 # gmail.compose is the narrowest scope that can write drafts. It also allows sending, but no
 # tool here sends; Jarvis only reads and drafts.
+DRIVE_METADATA = "https://www.googleapis.com/auth/drive.metadata.readonly"  # see drive.py
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file",  # only files Jarvis creates (notes)
+    "https://www.googleapis.com/auth/drive.file",  # only files Jarvis creates (notes, course files)
+    DRIVE_METADATA,  # names and links of other Drive files (Saved from Chrome), not contents
 ]
 CLIENT_FILE = config.ROOT / "google_client.json"
 TOKEN_FILE = config.ROOT / ".google_token.json"
@@ -36,7 +38,8 @@ def credentials():
         if _creds is None:
             if not TOKEN_FILE.exists():
                 raise RuntimeError("Google isn't set up yet (run: python -m jarvis.google_auth)")
-            _creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+            # The scopes granted at sign-in, so a token from before a scope was added keeps working.
+            _creds = Credentials.from_authorized_user_file(str(TOKEN_FILE))
         if not _creds.valid:
             _creds.refresh(Request())
             _save(_creds)

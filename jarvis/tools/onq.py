@@ -29,7 +29,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 import requests
 
@@ -651,6 +651,59 @@ def onq_read_content(course, item):
     c = _course(course)
     if item.strip().startswith("http"):
         return _read_page(c, item.strip(), item.strip())
+    where, t = _find(c, item)
+    if t.get("TypeIdentifier") == "Page":
+        return _read_page(c, t["Url"], f"{where} / {t['Title']}")
+    if t.get("TypeIdentifier") != "File":
+        return _not_file(c, t)
+    r = c["site"].get(f"/d2l/api/le/{LE}/{c['id']}/content/topics/{t['TopicId']}/file", raw=True)
+    text = _document_text(r.content, t.get("Url") or "", r.headers.get("Content-Type", ""))
+    return _clip(c, f"{where} / {t['Title']}", text)
+
+
+@tool("Get the actual file (PDF, slides, Word, ...) of something posted in an OnQ or Smith "
+      "Learning course's Content, in the owner's Google Drive, for another Claude to open with "
+      "its Google Drive tools. If the same file is already in Saved from Chrome (the owner's "
+      "downloads), says where; otherwise saves it into Saved from Jarvis. Returns the Drive file "
+      "id and link. Find the item with onq_content first.",
+      course={"type": "string", "description": "Course code or name, e.g. 'ELEC 221'"},
+      item={"type": "string", "description": "The item's id from onq_content, its title, or "
+                                              "the URL of a file on the course site"})
+def onq_get_file(course, item):
+    from jarvis import drive  # Google libraries load only when needed
+    c = _course(course)
+    if item.strip().startswith("http"):
+        url, data, mime = _fetch(c["site"], item.strip())
+        if "html" in mime:
+            raise ValueError("That's a web page, not a file; read it with onq_read_content.")
+    else:
+        where, t = _find(c, item)
+        if t.get("TypeIdentifier") == "Page":
+            raise ValueError(f"{t['Title']} is a web page, not a file; read it with "
+                             "onq_read_content, which also lists the files it links to.")
+        if t.get("TypeIdentifier") != "File":
+            return _not_file(c, t)
+        r = c["site"].get(f"/d2l/api/le/{LE}/{c['id']}/content/topics/{t['TopicId']}/file", raw=True)
+        url, data, mime = t.get("Url") or t["Title"], r.content, r.headers.get("Content-Type", "")
+    name = unquote(url.split("?")[0].rsplit("/", 1)[-1]) or "file"
+    folder, f, note = drive.find(data, name)
+    if f:
+        said = f"Already in the owner's Google Drive, in {folder}"
+    else:
+        f = drive.save(data, name, mime.split(";")[0])
+        notify.record(f"📥 Saved {name} from {c['name']} to Google Drive: [{name}]({f['webViewLink']})")
+        said = f"Not in {drive.CHROME}, so Jarvis saved it to the owner's Google Drive, in {drive.JARVIS}"
+    return (f"{said}: {f['name']} (Drive file id {f['id']}, {f['webViewLink']}). Open it with "
+            f"Google Drive tools using that file id. {note}").strip()
+
+
+def _not_file(course, t):
+    url = t.get("Url") or ""
+    return f"{t['Title']} is a link, not a file: " + (course["site"].host + url if url.startswith("/") else url)
+
+
+def _find(c, item):
+    """(module path, topic) of one Content item, by id, exact title or part of a title."""
     topics = _content(c)
     want = re.sub(r"\W", "", item).lower()
     found = ([(w, t) for w, t in topics if str(t["TopicId"]) == item.strip()]
@@ -662,15 +715,7 @@ def onq_read_content(course, item):
         raise ValueError(f"Several items match {item!r}, give an id: " + "; ".join(
             f"{w} / {t['Title']} ({_kind(t)}) [id {t['TopicId']}]" for w, t in found[:15]))
     # One title can be posted twice (a .docx and a .pdf of the same lab): PDF first.
-    where, t = sorted(found, key=lambda f: _kind(f[1]) != "pdf")[0]
-    if t.get("TypeIdentifier") == "Page":
-        return _read_page(c, t["Url"], f"{where} / {t['Title']}")
-    if t.get("TypeIdentifier") != "File":
-        url = t.get("Url") or ""
-        return f"{t['Title']} is a link, not a file: " + (c["site"].host + url if url.startswith("/") else url)
-    r = c["site"].get(f"/d2l/api/le/{LE}/{c['id']}/content/topics/{t['TopicId']}/file", raw=True)
-    text = _document_text(r.content, t.get("Url") or "", r.headers.get("Content-Type", ""))
-    return _clip(c, f"{where} / {t['Title']}", text)
+    return sorted(found, key=lambda f: _kind(f[1]) != "pdf")[0]
 
 
 def _clip(course, label, text):
