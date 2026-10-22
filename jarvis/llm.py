@@ -170,11 +170,14 @@ class Brain:
         project is open)."""
         # A Claude session's timers are posted: the owner may be away from the laptop.
         token = notify.channel.set("discord" if self.channel == "claude" else self.channel)
+        asker = tools.asker.set(self.channel)
+        tools.turn += 1
         trace = {"said": [], "tools": []}  # for learning mode
         try:
             reply = self._ask(text, follow_up, on_text, timing, on_tool, trace, context)
         finally:
             notify.channel.reset(token)
+            tools.asker.reset(asker)
         learn.log_exchange(self.channel, text, reply, trace["said"], trace["tools"], follow_up)
         return reply
 

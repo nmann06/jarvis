@@ -58,6 +58,7 @@ ONEDRIVE_CLIENT_ID = os.getenv("ONEDRIVE_CLIENT_ID", "")  # Entra app registrati
 # Which accounts can sign in: common (any), consumers (personal), organizations, or a
 # school or work tenant such as queensu.ca
 ONEDRIVE_TENANT = os.getenv("ONEDRIVE_TENANT", "common")
+IMESSAGE_SSH = os.getenv("IMESSAGE_SSH", "")  # ssh host of the Mac VM running Messages (README)
 SMITH_USER = os.getenv("SMITH_USER", "")  # smithlearning.ca login, so expired sessions renew
 SMITH_PASSWORD = os.getenv("SMITH_PASSWORD", "")
 

@@ -4,6 +4,7 @@ The decorator registers the function with its JSON schema; llm.py sends SCHEMAS 
 calls run() with whatever Claude asks for.
 """
 
+import contextvars
 import json
 import logging
 
@@ -11,6 +12,11 @@ log = logging.getLogger(__name__)
 
 REGISTRY = {}  # name -> function
 SCHEMAS = []  # tool definitions in the API's format
+# Who is asking: "voice", "discord" or "claude" (another Claude session) while llm.Brain runs a
+# turn; None for tools called directly through MCP. And how many turns there have been, so a
+# tool can tell a later turn from this one (imessage: a draft is only sent after the owner's yes).
+asker = contextvars.ContextVar("asker", default=None)
+turn = 0
 
 
 def tool(description, **properties):
@@ -62,5 +68,5 @@ def warm_up():
 
 # Import the tool modules so their @tool decorators run.
 from jarvis.tools import (clock, gmail, icloud_calendar, notes, sheets, system,  # noqa: E402,F401
-                          onedrive, onq, projects, spotify, timers, trello,
-                          weather)
+                          imessage, onedrive, onq, projects, spotify, timers,
+                          trello, weather)
