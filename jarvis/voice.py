@@ -239,7 +239,7 @@ def _stop_recognizer():
                                 json.dumps(STOP_PHRASES + _DECOYS + ["[unk]"]))
 
 
-def _words(text):
+def _word_list(text):
     return re.sub(r"[^a-z' ]+", " ", text.lower()).split()
 
 
@@ -248,10 +248,10 @@ def _is_echo(heard, reply):
     (Vosk heard "but it stays" as "stop"). Whisper hears words in context far better: if it
     hears no stop word at the end of heard, but mostly words from reply, it was echo."""
     clip = np.concatenate(heard)[-int(ECHO_CHECK_SECONDS * audio.SAMPLE_RATE):]
-    words = _words(stt.transcribe(clip.astype(np.float32) / 32768))
+    words = _word_list(stt.transcribe(clip.astype(np.float32) / 32768))
     if _STOP_WORDS & set(words):
         return False
-    echoed = [w for w in words if w in set(_words(reply))]
+    echoed = [w for w in words if w in set(_word_list(reply))]
     if len(words) >= 2 and len(echoed) * 2 > len(words):
         log.info("heard a stop, but Whisper heard %r, my own words: ignored", " ".join(words))
         return True
@@ -282,7 +282,7 @@ def _listen_for_stop(mic, stop, done, saying, reply):
             if text in STOP_PHRASES:
                 # The canceller lets some echo through, mostly as a reply starts, so Jarvis
                 # saying "stop by the office" could otherwise stop itself.
-                if set(_words(saying())) & set(text.split()):
+                if set(_word_list(saying())) & set(text.split()):
                     log.info("heard %r, but I just said it myself: ignored", text)
                     rec = _stop_recognizer()
                     continue
