@@ -52,6 +52,11 @@ GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")  # job-search sheet, from its
 TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/authorize
 TRELLO_BOARD = os.getenv("TRELLO_BOARD", "todo")  # main todo board
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")  # from developer.spotify.com/dashboard
+ONEDRIVE_CLIENT_ID = os.getenv("ONEDRIVE_CLIENT_ID", "")  # Entra app registration (README)
+# Which accounts can sign in: common (any), consumers (personal), organizations, or a
+# school or work tenant such as queensu.ca
+ONEDRIVE_TENANT = os.getenv("ONEDRIVE_TENANT", "common")
 SMITH_USER = os.getenv("SMITH_USER", "")  # smithlearning.ca login, so expired sessions renew
 SMITH_PASSWORD = os.getenv("SMITH_PASSWORD", "")
 

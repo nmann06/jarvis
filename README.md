@@ -172,6 +172,42 @@ way and the OnQ tools cover both sites. It signs in with a Smith username and a 
 and `SMITH_PASSWORD` in `.env` and Jarvis signs in by itself, or sign in once with
 `.venv/bin/python -m jarvis.tools.onq login smith` (asked again when the session expires).
 
+### Spotify setup
+
+Jarvis controls whatever device is playing Spotify (your phone, the desktop app, a speaker):
+what's playing, play a song/album/artist/playlist by name, pause, skip, volume, shuffle, and
+moving playback to another device. Controlling playback needs Spotify Premium.
+
+1. developer.spotify.com/dashboard -> Create app. Name Jarvis, any description, Redirect URI
+   `http://127.0.0.1:8767/callback` (exactly that), tick **Web API**, save.
+2. Settings -> copy the **Client ID** into `.env` as `SPOTIFY_CLIENT_ID` (no secret needed).
+   Under User Management, add your Spotify account's email if it asks.
+3. `.venv/bin/python -m jarvis.tools.spotify login`, open the link (a phone is fine), agree, and
+   paste back the `http://127.0.0.1:8767/callback?code=...` address the browser ends up on (it
+   won't load; that's expected). Then `systemctl --user restart jarvis`.
+
+### OneDrive setup
+
+Jarvis can list, search and read OneDrive files (Word, PDF, text), make folders and save new
+files (Word documents or text). It never deletes, moves or overwrites: a taken name gets a
+number added.
+
+1. entra.microsoft.com (or portal.azure.com -> Microsoft Entra ID) -> App registrations -> New
+   registration. Name Jarvis; account types: **Accounts in any organizational directory and
+   personal Microsoft accounts**; Redirect URI: platform **Public client/native**, value
+   `https://login.microsoftonline.com/common/oauth2/nativeclient`. Register.
+2. Authentication -> Advanced settings -> **Allow public client flows: Yes** -> Save.
+3. API permissions -> Add -> Microsoft Graph -> Delegated: `Files.ReadWrite`, `offline_access`,
+   `User.Read`.
+4. Copy the **Application (client) ID** into `.env` as `ONEDRIVE_CLIENT_ID`. For a personal
+   OneDrive leave `ONEDRIVE_TENANT=common`; for the Queen's one, `ONEDRIVE_TENANT=queensu.ca`.
+5. `.venv/bin/python -m jarvis.tools.onedrive login` prints a code: enter it at
+   microsoft.com/devicelogin (a phone is fine) and sign in. Then `systemctl --user restart jarvis`.
+
+A school account may say the app **needs admin approval**: Queen's then has to approve it, or
+use a personal OneDrive. Your own account usually can't register apps in the school's directory,
+which is why step 1 can be done with a personal Microsoft account at portal.azure.com.
+
 ### Discord setup
 
 1. discord.com/developers/applications -> New Application -> Bot -> Reset Token; put it in `.env`
@@ -272,7 +308,7 @@ systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, O
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
-(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, OnQ and Smith Learning (read-only):
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), OnQ and Smith Learning (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
 `onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`),
 `onq_content` (everything posted under Content, plus pages linked from module descriptions, as some
