@@ -107,6 +107,30 @@ Discord: DM the bot, @mention it in a server, reply to one of its messages, or w
 were set: spoken, or posted in `#jarvis` (with an @mention unless `DISCORD_MENTION=off`), where
 calendar records also go.
 
+### Learning mode
+
+Every reply Jarvis gives (spoken, in Discord or to a Claude session) is logged to
+`data/exchanges.jsonl`. To teach it, run this in a terminal:
+
+```
+.venv/bin/python -m jarvis.learn
+```
+
+It shows the last reply, then each new one as it happens. Type the reply you wanted ("Your first
+class is at eight thirty in Kingston Hall.") or a note about it ("too long", "you should have
+checked OnQ"); start with `=` to mark it as the exact wording. Enter skips. Claude turns each
+piece of feedback into a one-line lesson and shows it; `undo` drops it. Lessons are kept in
+`data/lessons.json` and Jarvis follows them from its next reply on, either for that channel
+(how it sounds when speaking, how it formats Discord messages) or everywhere. The newest 40 are
+used, plus the last 8 replies you rewrote as examples.
+
+```
+.venv/bin/python -m jarvis.learn recent 5    # feedback on the last 5 replies
+.venv/bin/python -m jarvis.learn lessons     # what it has learned
+.venv/bin/python -m jarvis.learn forget 3    # drop lesson #3
+.venv/bin/python -m jarvis.learn add "Never read out email addresses."
+```
+
 ### Apple Calendar setup
 
 account.apple.com -> Sign-In and Security -> App-Specific Passwords -> create one, then put your

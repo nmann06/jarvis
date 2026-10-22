@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 import anthropic
 import httpx2
 
-from jarvis import config, notify, tools
+from jarvis import config, learn, notify, tools
 from jarvis.tools.clock import TZ, get_time_and_date
 
 log = logging.getLogger(__name__)
@@ -94,11 +94,12 @@ class Brain:
 
     def __init__(self, channel="voice"):
         self.channel = channel
-        # The system prompt never changes (the time goes in each turn instead), so it is cached
-        # along with the tools ahead of it. Each request also caches itself as a whole
-        # (cache_control in _ask), so the next one in the conversation reads that prefix back.
-        self._system = [{"type": "text", "text": SYSTEM.format(style=STYLES[channel]),
-                         "cache_control": CACHE}]
+        # The system prompt changes only when learning mode adds a lesson (the time goes in
+        # each turn instead), so it is cached along with the tools ahead of it. Each request
+        # also caches itself as a whole (cache_control in _ask), so the next one in the
+        # conversation reads that prefix back.
+        self._system, self._lessons = None, False
+        self._refresh_system()
         self._max_tokens = config.MAX_TOKENS if channel == "voice" else config.MAX_TOKENS_DISCORD
         # Idle connections are normally dropped after 5 s; keep them for a minute, so the one
         # prewarm() opens is still there when the owner finishes talking.
@@ -113,6 +114,17 @@ class Brain:
         self._history = []
         self._lock = threading.Lock()  # prewarm() trims it from another thread
         self._max_chars = self._max_tokens * CHARS_PER_TOKEN
+
+    def _refresh_system(self):
+        """The persona, reply style and lessons from the owner's feedback (jarvis.learn), rebuilt
+        when the lessons change."""
+        version = learn.version()
+        if version == self._lessons:
+            return
+        lessons = learn.instructions(self.channel)
+        text = SYSTEM.format(style=STYLES[self.channel]) + (f"\n\n{lessons}" if lessons else "")
+        self._system = [{"type": "text", "text": text, "cache_control": CACHE}]
+        self._lessons = version
 
     def _messages(self):
         with self._lock:
@@ -129,6 +141,7 @@ class Brain:
         talking, so the real request has only their new words left to read and its first word
         comes sooner. max_tokens=0: nothing is written back. The cache lasts an hour."""
         self._trim()  # a new conversation, and this request writes the cache anyway (HISTORY_SLACK)
+        self._refresh_system()
         messages = self._messages()
         if messages:  # cache up to the end of the last reply, which is always plain text
             last = messages[-1]
@@ -156,17 +169,21 @@ class Brain:
         records each request and tool call."""
         # A Claude session's timers are posted: the owner may be away from the laptop.
         token = notify.channel.set("discord" if self.channel == "claude" else self.channel)
+        trace = {"said": [], "tools": []}  # for learning mode
         try:
-            return self._ask(text, follow_up, on_text, timing, on_tool)
+            reply = self._ask(text, follow_up, on_text, timing, on_tool, trace)
         finally:
             notify.channel.reset(token)
+        learn.log_exchange(self.channel, text, reply, trace["said"], trace["tools"], follow_up)
+        return reply
 
-    def _ask(self, text, follow_up, on_text, timing, on_tool):
+    def _ask(self, text, follow_up, on_text, timing, on_tool, trace):
         """Send the owner's words to Claude, running any tools it calls. Returns the reply.
 
         follow_up means it was heard without the wake word; Claude may then decide it wasn't
         meant for Jarvis, and ask returns None.
         """
+        self._refresh_system()
         messages = self._messages()
         start = len(messages)
         messages.append({"role": "user", "content": text})
@@ -208,6 +225,7 @@ class Brain:
                                 on_text(event.delta.text)
                 else:
                     response = stream.get_final_message()
+            trace["said"].append(said)
             if response is None:
                 request.update(done=time.perf_counter(), stop="reply limit")
                 log.warning("reply cut off at about %d tokens", self._max_tokens)
@@ -237,6 +255,7 @@ class Brain:
             messages.append({"role": "assistant", "content": response.content})
             results = []
             for call, result, is_error, started, finished in _run_tools(calls):
+                trace["tools"].append({"name": call.name, "input": call.input, "error": is_error})
                 if timing:
                     timing.tool(call.name, started, finished, is_error)
                 log.info("tool %s(%s) -> %s", call.name, call.input, result[:200])
