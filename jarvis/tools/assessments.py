@@ -17,7 +17,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 
-from jarvis import config
+from jarvis import config, tools
 from jarvis.tools import icloud_calendar, onq, tool
 from jarvis.tools.clock import TZ
 
@@ -34,6 +34,9 @@ TEST_CALENDARS = {"Midterms"}
 TEST_WORDS = re.compile(r"\b(quiz|quizzes|midterm|test|exam|final)\b", re.I)
 ANNOUNCEMENT_DAYS = 21  # how far back to look for announcements about tests
 SNIPPET_CHARS = 600  # of each announcement: the sentences that mention a test
+# "16:30-17:10" -> "16:30": the owner only wants start times, and an end time in an announcement
+# otherwise gets read out.
+TIME_RANGE = re.compile(r"(\d{1,2}(?::|\.)\d{2}\s*(?:[ap]\.?m\.?)?)\s*(?:-|–|—|to)\s*\d{1,2}(?::|\.)\d{2}\s*(?:[ap]\.?m\.?)?", re.I)
 
 EXTRACT = f"""List every quiz, test, midterm and exam in this course syllabus that has a date \
 or a week, for the term starting the week of {TERM_WEEK1:%B %d, %Y}. Week 1 starts Monday \
@@ -170,7 +173,8 @@ def _announcements():
         found = []
         for c, notes in zip(courses, posted):
             for n in notes:
-                sentences = [x for x in re.split(r"(?<=[.!?])\s+", n["text"]) if TEST_WORDS.search(x)]
+                text = TIME_RANGE.sub(r"\1", n["text"])
+                sentences = [x for x in re.split(r"(?<=[.!?])\s+", text) if TEST_WORDS.search(x)]
                 if sentences or TEST_WORDS.search(n["title"]):
                     found.append({"course": onq.short_code(c), "posted": f"{n['when']:%a %b} {n['when'].day}",
                                   "title": n["title"], "about tests": " ".join(sentences)[:SNIPPET_CHARS],
@@ -216,7 +220,10 @@ def _plural(n, kind):
 
 def _when(t):
     s = t["start"]
-    text = f"{s:%a %b} {s.day}" + (f", {s:%I:%M %p}".replace(" 0", " ") if t["timed"] else "")
+    # Spoken replies give a bare clock time ("four thirty", not "four thirty PM"): with AM/PM in
+    # the data, Claude says it however the prompt asks.
+    clock = "%I:%M" if tools.asker.get() == "voice" else "%I:%M %p"
+    text = f"{s:%a %b} {s.day}" + (f", {s:{clock}}".replace(" 0", " ") if t["timed"] else "")
     if t.get("closes") and t["closes"] != s.date():
         text = f"opens {text}, closes {t['closes']:%a %b} {t['closes'].day}"
     return text
@@ -247,8 +254,10 @@ def get_tests(start_date, days):
                    "location": t.get("location"), "weight": t.get("weight"),
                    "from": ", ".join(t["sources"])} for t in found],
         "announcements": "couldn't check" if news is None else "none about tests" if not news else
-        {"note": onq.CONTENT.strip() + " Mention any that move, add or cancel a test above, or "
-                 "give its room or start time (16:30 is four thirty).", "posts": news},
+        {"note": onq.CONTENT.strip() + " Use a room from them in your answer without saying "
+                 "where it came from. Mention an announcement only if it moves a test above to a "
+                 "different day or start time, or adds or cancels one (16:30 is four thirty).",
+         "posts": news},
     }
 
 
