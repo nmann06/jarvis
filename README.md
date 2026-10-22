@@ -39,7 +39,7 @@ when Claude needs a tool (measured on this laptop). What keeps it there, in the 
 - **Speaking while Claude writes.** Speech starts with the first sentence (Piper takes 0.03-0.23 s
   for it) while Claude writes the rest, and words said before a tool call ("Checking your
   calendar.") are spoken as soon as the call starts. If Claude thinks out loud there instead
-  ("I need tomorrow's date, so I'll check..."), anything over six words is said as "One moment."
+  ("I need tomorrow's date, so I'll check..."), Jarvis says "One moment." in its place.
 - **Faster tools.** Tools for different services in one reply (OnQ and the calendar, say) run at
   the same time. Email search fetches the messages in one batched request (2.5 s -> 0.6 s for
   ten), OnQ due work asks for every course at once (1.5-2.5 s -> 0.3-0.4 s), calendar queries go
@@ -288,6 +288,7 @@ restart Jarvis, and update the connector's URL.
 | `CLAUDE_EFFORT` | `low` | `low` / `medium` / `high` |
 | `HISTORY_TURNS` | `10` | Past exchanges sent with each request (up to 5 more pile up before the oldest are dropped, so the conversation stays cached) |
 | `CLAUDE_RACE` | `on` | Send each Claude request twice at once and use whichever starts answering first |
+| `PROJECT_MODEL` | `sonnet` | Claude Code model for project mode (`opus` uses up the plan faster) |
 | `WHISPER_MODEL` | `large-v3-turbo` | `tiny.en` / `base.en` / `small.en` for CPU |
 | `WHISPER_DEVICE` | `cuda` | `cpu` uses int8 and `WHISPER_THREADS` |
 | `PIPER_VOICE` | `models/piper/en_GB-alan-medium.onnx` | |
@@ -304,11 +305,42 @@ restart Jarvis, and update the connector's URL.
 Done: TTS, STT (GPU), Claude with tools, wake word + end-of-speech detection, full pipeline,
 systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, OnQ, briefings.
 
+## Project mode
+
+For longer jobs (schoolwork, researching people or companies, a long discussion) Jarvis hands
+the work to Claude Code (`claude -p`) on the Claude plan it's signed in with (Pro), not the API:
+Jarvis removes the API key from its environment, so it can't bill the API. Say **"Jarvis, new
+project"**:
+
+> **You:** Jarvis, new project. **Jarvis:** What are you working on?
+> **You:** 324 lab. **Jarvis:** Making a Lab 4 folder in your ELEC 324 folder in OneDrive... Done. How shall I start?
+> **You:** Do the prelab. **Jarvis:** Starting the project. Anything you say now goes to it until you say "end project".
+
+(or "start a project: ...", or ask in Discord). It runs in `data/projects/<name>/` with one
+Claude Code session per project.
+
+- **What it can use:** web search and fetch, and Jarvis's own tools through its MCP server:
+  OnQ (content, syllabi, due dates), the calendar, notes, and OneDrive, where it can make
+  folders and save new files (Word documents for written work) but never change or delete
+  anything. No shell and no local file edits. If OneDrive isn't set up, it says so and the
+  project runs without a folder.
+- **What you hear:** Claude Code is told only text inside `<say>...</say>` is read aloud: a line
+  when it starts, an update about once a minute or when it finds something, and a short summary
+  at the end. Jarvis says those between conversations, and "still working on it" after two
+  quiet minutes. Everything it writes goes to a thread in #jarvis.
+- **Talking to it:** by voice, what you say after "Hey Jarvis" goes to the project until you say
+  "end project" (which also stops a run in progress). Messages sent mid-run wait for it to
+  finish. Writing in the project's Discord thread sends to it too. "Resume the ... project"
+  reopens one; "what projects do I have" lists them.
+
+It shares the Pro plan's usage limits with your own Claude Code use (Sonnet by default,
+`PROJECT_MODEL`). Needs `MCP_TOKEN` set for the Jarvis tools (it is).
+
 ## Tools
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
-(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), OnQ and Smith Learning (read-only):
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `resume_project` / `list_projects` (project mode, above), OnQ and Smith Learning (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
 `onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`),
 `onq_content` (everything posted under Content, plus pages linked from module descriptions, as some

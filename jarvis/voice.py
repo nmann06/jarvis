@@ -14,7 +14,7 @@ import wave
 import numpy as np
 import sounddevice as sd
 
-from jarvis import audio, config, latency, llm, notify, stt, tools, tts
+from jarvis import audio, config, latency, llm, notify, project, stt, tools, tts
 from jarvis.wakeword import WakeWord
 
 log = logging.getLogger("jarvis.voice")
@@ -86,6 +86,11 @@ def is_continue_request(text):
     return bool(_CONTINUE.fullmatch(_words(text)))
 
 
+# Leaving project mode. Like repeat requests, the whole utterance must match.
+_END_PROJECT = re.compile(_FILLER + r"(?:end|close|exit|leave|quit|stop|finish|that s it for)"
+                          r" (?:the |this )?project(?: mode)?(?: please| jarvis)*")
+
+
 # Only the wake word ("Hey Jarvis?", "Jarvis"): often said in the follow-up window by someone
 # who thinks Jarvis has stopped listening. Treated as a wake: the chime, then listening, with
 # no trip to Claude for a "Yes, sir?".
@@ -101,7 +106,13 @@ def is_wake_only(text):
 # Claude isn't asked to judge whether it was (and can't wrongly decide it wasn't).
 _ADDRESSED = re.compile(r"\s*(?:(?:hey|hi|ok|okay|yo)\s+jarvis\b|jarvis\s*[,.!?])", re.I)
 
-PREAMBLE_WORDS = 6  # longest thing said before a tool call that is spoken as it is
+# Said before a tool call, these sound like Claude working the request out aloud rather than
+# saying what it's doing ("I need tomorrow's date, so I'll check your calendar first.").
+_THINKING_ALOUD = re.compile(r"\b(?:i need|i'll need|i will need|need to (?:know|check|find|work)|"
+                             r"so i'll|so i will|so let me|in order to|to answer (?:that|this)|"
+                             r"to work (?:that|it|this) out|to find out|i should|i don't have|"
+                             r"i do not have|first,? i)\b", re.I)
+PREAMBLE_WORDS = 15  # longer than this before a tool call is too long to say anyway
 
 
 class _Sentences:
@@ -122,10 +133,10 @@ class _Sentences:
     def tool(self, name):
         """Claude has started calling a tool: what it said just before ("Checking your
         calendar.") is spoken while the tool runs. Haiku sometimes thinks out loud there
-        instead ("I need tomorrow's date, so I'll check your calendar first."), so anything
-        over PREAMBLE_WORDS words becomes "One moment." (only once a reply)."""
+        instead ("I need tomorrow's date, so I'll check your calendar first."), so that, or
+        anything over PREAMBLE_WORDS words, becomes "One moment." (only once a reply)."""
         preamble, self._buffer = self._buffer.strip(), ""
-        if len(preamble.split()) > PREAMBLE_WORDS:
+        if _THINKING_ALOUD.search(preamble) or len(preamble.split()) > PREAMBLE_WORDS:
             log.info("before %s, said 'One moment.' instead of: %s", name, preamble)
             preamble, self._held = "" if self._held else "One moment.", True
         self._put(preamble)
@@ -298,6 +309,8 @@ def _answer(mic, brain, utterance, follow_up, turn):
         turn.outcome = "continued" if done else "stopped"
         return done
     _unfinished = None  # a new request: whatever was cut off before is dropped
+    if (p := project.voice_project()) is not None:
+        return _to_project(mic, p, text, turn)
     sentences, result = _Sentences(), {}
 
     def think():
@@ -340,6 +353,37 @@ def _answer(mic, brain, utterance, follow_up, turn):
     return True
 
 
+def _to_project(mic, p, text, turn):
+    """In project mode, what the owner says goes to Claude Code instead of Jarvis's Claude."""
+    global _last_reply
+    if _END_PROJECT.fullmatch(_words(text)):
+        project.end_voice()
+        reply = f"Closed the {p.name} project. Back to normal, sir."
+    else:
+        reply = ("Got it. I'll pass that on when it finishes what it's doing." if p.send(text)
+                 else "On it.")
+    with _speaker:
+        _speak(mic, [reply], timing=turn)
+    _last_reply = turn.reply = reply
+    turn.outcome = "to project"
+    log.info("jarvis (project %s): %s", p.slug, reply)
+    mic.clear()
+    return False  # no follow-up window: the project's updates come in between conversations
+
+
+def _speak_updates(mic):
+    """Say what a project has queued to say, between conversations."""
+    global _last_reply
+    lines = []
+    while not project.speech.empty():
+        lines.append(project.speech.get_nowait())
+    log.info("project says: %s", " ".join(lines))
+    with _speaker:
+        _speak(mic, lines)
+    _last_reply = " ".join(lines)
+    mic.clear()
+
+
 def run():
     wake, brain = WakeWord(), llm.Brain("voice")
     tools.warm_up()
@@ -350,7 +394,10 @@ def run():
     with audio.Mic() as mic:
         log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)", config.WAKE_THRESHOLD)
         while True:
-            score = wake.wait(mic)
+            score = wake.wait(mic, interrupt=lambda: not project.speech.empty())
+            if score is None:  # a project has something to say
+                _speak_updates(mic)
+                continue
             if mic.captured < _alert_until:
                 # An alert can name the project "jarvis"; don't wake on it.
                 log.info("wake (score %.2f) during an alert: ignored", score)

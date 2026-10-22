@@ -22,14 +22,17 @@ class WakeWord:
         self._model = Model(wakeword_models=[MODEL], inference_framework="onnx")
         self.preroll = deque(maxlen=PREROLL_BLOCKS)
 
-    def wait(self, mic):
-        """Block until the wake word is heard; returns the detection score.
+    def wait(self, mic, interrupt=None):
+        """Block until the wake word is heard; returns the detection score. If interrupt is
+        given, it's checked every block, and wait returns None as soon as it's true.
 
         Afterwards self.preroll holds the last blocks heard, which may contain the start of
         the request if it followed "Hey Jarvis" without a pause.
         """
         self.preroll.clear()
         while True:
+            if interrupt and interrupt():
+                return None
             block = mic.read()
             self.preroll.append(block)
             score = self._model.predict(block)[MODEL]
