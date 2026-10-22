@@ -224,7 +224,8 @@ Jarvis says when a Claude Code session on this laptop is done ("Sir, Claude has 
 jarvis.") or needs you to check something: a permission, a question, or a plan to approve. Only
 things more than 30 s after your last message to that session are said
 (`JARVIS_CLAUDE_MIN_SECONDS`), since before that you're probably still watching. It goes through
-a socket Jarvis listens on (`$XDG_RUNTIME_DIR/jarvis.sock`, `jarvis/alerts.py`), spoken, or
+a socket Jarvis listens on (`$XDG_RUNTIME_DIR/jarvis.sock`, `jarvis/alerts.py`; project-mode runs,
+which announce themselves, are skipped), spoken, or
 posted in #jarvis if voice is off. Any program can send it `{"text": "..."}` on one line.
 
 The hook is `deploy/claude-hook.py`, set up in `~/.claude/settings.json` for all sessions

@@ -72,6 +72,8 @@ def send(text):
 
 
 def main():
+    if os.getenv("JARVIS_PROJECT"):
+        return  # a Jarvis project run (jarvis/project.py), which announces itself
     event = json.load(sys.stdin)
     session = re.sub(r"[^\w-]", "", event.get("session_id", "")) or "unknown"
     if event.get("hook_event_name") == "UserPromptSubmit":

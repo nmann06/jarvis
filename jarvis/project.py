@@ -162,7 +162,8 @@ class Project:
         cmd = [shutil.which("claude") or os.path.expanduser("~/.local/bin/claude"), "-p", text,
                "--output-format", "stream-json", "--verbose", "--model", config.PROJECT_MODEL,
                "--append-system-prompt", PROMPT.format(folder=folder),
-               "--disallowedTools", *BLOCKED]
+               # Anything not allowed below is refused, not asked about: nobody can answer.
+               "--permission-mode", "dontAsk", "--disallowedTools", *BLOCKED]
         allowed = list(TOOLS)
         if (mcp := _mcp_config()) is not None:
             # Only Jarvis's server, not whatever else this Claude Code login has connected.
@@ -178,6 +179,7 @@ class Project:
         # Without the API key Claude Code uses its own login (the owner's Claude plan); with it,
         # it would bill the API instead.
         env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "CLAUDE_EFFORT")}
+        env["JARVIS_PROJECT"] = "1"  # the Claude Code alert hook stays quiet: this announces itself
         log.info("project %s: %s", self.slug, text)
         self._process = subprocess.Popen(self._command(text), cwd=self.dir, env=env, text=True,
                                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -213,9 +215,10 @@ class Project:
         finally:
             done.set()
             code = self._process.wait()
-        if code and code != -15:  # -15: stopped on purpose
+        stopped = code in (143, -15)  # SIGTERM: stopped on purpose ("end project")
+        if code and not stopped:
             self.post(f"⚠️ Claude Code exited with code {code}")
-        if not said and code != -15:
+        if not said and not stopped:
             self._say(f"The {self.name} project has finished; the details are in Discord.")
 
     def _nudge(self, done):
