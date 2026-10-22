@@ -258,9 +258,9 @@ def find(name):
 
 
 def start(name, task, voice, folder=""):
-    """Start a new project (or continue one of the same name) with task as its first message.
-    folder is its OneDrive folder, if one was made for it."""
-    p = find(name) or _load(_slug(name))
+    """Start a new project (or continue one with exactly the same name) with task as its first
+    message. folder is its OneDrive folder, if one was made for it."""
+    p = _load(_slug(name))  # not find(): "324 lab 4" mustn't land in an old "324 lab"
     if folder:
         p.folder = folder
     if not p.thread_id and _open_thread:

@@ -138,7 +138,8 @@ class _Sentences:
         anything over PREAMBLE_WORDS words, becomes "One moment." (only once a reply)."""
         self.tools.append(name)
         preamble, self._buffer = self._buffer.strip(), ""
-        if _THINKING_ALOUD.search(preamble) or len(preamble.split()) > PREAMBLE_WORDS:
+        if (_THINKING_ALOUD.search(preamble.replace("\u2019", "'"))
+                or len(preamble.split()) > PREAMBLE_WORDS):
             log.info("before %s, said 'One moment.' instead of: %s", name, preamble)
             preamble, self._held = "" if self._held else "One moment.", True
         self._put(preamble)
