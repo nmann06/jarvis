@@ -147,7 +147,7 @@ def _calendar(start, end):
         found.append({"course": _number(e["title"]), "kind": _kind(e["title"], e["calendar"]),
                       "title": e["title"], "timed": timed,
                       "start": e["start"] if timed else datetime.combine(e["start"], time(), TZ),
-                      "end": e["end"] if timed else None, "location": e["location"],
+                      "location": e["location"],
                       "sources": [f"{e['calendar']} calendar"]})
     return found
 
@@ -203,7 +203,7 @@ def tests(start, end):
         same["sources"] += e["sources"]
         # The owner's calendar has the time and room for this term (a syllabus may be last year's).
         if e["timed"] and ("calendar" in e["sources"][0] or not same["timed"]):
-            same.update(start=e["start"], end=e.get("end"), timed=True)
+            same.update(start=e["start"], timed=True)
         same["location"] = same.get("location") or e.get("location")
         if e.get("closes") and e["start"].date() != e["closes"]:
             same["closes"] = max(same.get("closes") or e["closes"], e["closes"])
@@ -217,8 +217,6 @@ def _plural(n, kind):
 def _when(t):
     s = t["start"]
     text = f"{s:%a %b} {s.day}" + (f", {s:%I:%M %p}".replace(" 0", " ") if t["timed"] else "")
-    if t.get("end"):
-        text += f" to {t['end']:%I:%M %p}".replace(" 0", " ")
     if t.get("closes") and t["closes"] != s.date():
         text = f"opens {text}, closes {t['closes']:%a %b} {t['closes'].day}"
     return text
@@ -250,7 +248,7 @@ def get_tests(start_date, days):
                    "from": ", ".join(t["sources"])} for t in found],
         "announcements": "couldn't check" if news is None else "none about tests" if not news else
         {"note": onq.CONTENT.strip() + " Mention any that move, add or cancel a test above, or "
-                 "give its room or time (16:30 is four thirty).", "posts": news},
+                 "give its room or start time (16:30 is four thirty).", "posts": news},
     }
 
 
