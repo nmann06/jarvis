@@ -1,0 +1,18 @@
+# Optional: start the macOS VM at boot (Jarvis's iMessage/SMS bridge). To use it:
+#   ln -s ~/jarvis/deploy/macos-vm/macos-vm.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now macos-vm
+# (stop the hand-started VM first: python3 ~/jarvis/deploy/macos-vm/vmctl.py hmp system_powerdown)
+[Unit]
+Description=macOS VM for Jarvis's iMessage/SMS bridge (~/vm/macos-monterey)
+
+[Service]
+ExecStart=%h/jarvis/deploy/macos-vm/run.sh
+# Ask macOS to shut down cleanly, as the power button would.
+ExecStop=/bin/sh -c 'echo system_powerdown | socat - unix-connect:%h/vm/macos-monterey/monitor.sock; while kill -0 $MAINPID 2>/dev/null; do sleep 1; done'
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=30
+Nice=5
+
+[Install]
+WantedBy=default.target
