@@ -222,6 +222,11 @@ STOP_PHRASES = ["stop", "cancel", "stop it", "stop talking", "shut up", "be quie
 # phrases to choose from, an echoed "yes sir" came out as "stop".
 _DECOYS = ["sir", "yes sir", "no sir", "of course sir", "certainly sir"]
 _vosk = None
+# Whisper checks this much of the end of a "stop" for echo: long enough for "but it stays",
+# short enough that Jarvis's echo doesn't drown out the owner's "stop".
+ECHO_CHECK_SECONDS = 1.5
+# Any of these in Whisper's words means the owner did say stop (not "it" from "stop it").
+_STOP_WORDS = {"stop", "cancel", "shut", "quiet", "enough", "forget", "nevermind"}
 
 
 def _stop_recognizer():
@@ -234,9 +239,29 @@ def _stop_recognizer():
                                 json.dumps(STOP_PHRASES + _DECOYS + ["[unk]"]))
 
 
-def _listen_for_stop(mic, stop, done, saying):
+def _words(text):
+    return re.sub(r"[^a-z' ]+", " ", text.lower()).split()
+
+
+def _is_echo(heard, reply):
+    """Whether a stop Vosk heard was really Jarvis's own voice getting past the canceller
+    (Vosk heard "but it stays" as "stop"). Whisper hears words in context far better: if it
+    hears no stop word at the end of heard, but mostly words from reply, it was echo."""
+    clip = np.concatenate(heard)[-int(ECHO_CHECK_SECONDS * audio.SAMPLE_RATE):]
+    words = _words(stt.transcribe(clip.astype(np.float32) / 32768))
+    if _STOP_WORDS & set(words):
+        return False
+    echoed = [w for w in words if w in set(_words(reply))]
+    if len(words) >= 2 and len(echoed) * 2 > len(words):
+        log.info("heard a stop, but Whisper heard %r, my own words: ignored", " ".join(words))
+        return True
+    return False
+
+
+def _listen_for_stop(mic, stop, done, saying, reply):
     """While Jarvis talks, listen on the (echo-cancelled) mic for "stop" or "cancel" and set
-    stop when heard. saying() is what Jarvis is saying now. Runs until done is set."""
+    stop when heard. saying() is what Jarvis is saying now, reply() the whole reply so far.
+    Runs until done is set."""
     rec, heard = _stop_recognizer(), []
     try:
         while not done.is_set():
@@ -257,9 +282,11 @@ def _listen_for_stop(mic, stop, done, saying):
             if text in STOP_PHRASES:
                 # The canceller lets some echo through, mostly as a reply starts, so Jarvis
                 # saying "stop by the office" could otherwise stop itself.
-                said = set(re.sub(r"[^a-z' ]+", " ", saying().lower()).split())
-                if said & set(text.split()):
+                if set(_words(saying())) & set(text.split()):
                     log.info("heard %r, but I just said it myself: ignored", text)
+                    rec = _stop_recognizer()
+                    continue
+                if _is_echo(heard, reply()):
                     rec = _stop_recognizer()
                     continue
                 log.info("heard %r: stopping", text)
@@ -289,7 +316,9 @@ def _speak(mic, texts, thinking=False, timing=None):
     stop, done = threading.Event(), threading.Event()
     saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
               else (lambda: " ".join(texts)))
-    listener = threading.Thread(target=_listen_for_stop, args=(mic, stop, done, saying),
+    reply = ((lambda: " ".join(texts.spoken)) if isinstance(texts, _Sentences)
+             else (lambda: " ".join(texts)))
+    listener = threading.Thread(target=_listen_for_stop, args=(mic, stop, done, saying, reply),
                                 name="stop", daemon=True)
     listener.start()
     try:
