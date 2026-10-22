@@ -1,5 +1,7 @@
-"""Tests, quizzes, midterms and exams, from three places at once: the syllabi, the owner's
-calendar and OnQ/Smith Learning quizzes. Merged, so each test is said once, and counted by kind.
+"""Tests, quizzes, midterms and exams, from the syllabi, the owner's calendar and OnQ/Smith
+Learning quizzes at once. Merged, so each test is said once, and counted by kind. Recent course
+announcements that mention a test come along too, as they're where changes ("Test 1 is moved
+to Wednesday") show up first.
 
 Syllabus dates don't change during a term, so they're read once into data/assessments.csv
 rather than on every question (Claude reads each cached syllabus and lists its tests):
@@ -30,6 +32,8 @@ TERM_WEEK1 = date(2026, 9, 14)
 EXTRACT_MODEL = "claude-opus-5-5"  # run once a term, so the best reader
 TEST_CALENDARS = {"Midterms"}
 TEST_WORDS = re.compile(r"\b(quiz|quizzes|midterm|test|exam|final)\b", re.I)
+ANNOUNCEMENT_DAYS = 21  # how far back to look for announcements about tests
+SNIPPET_CHARS = 600  # of each announcement: the sentences that mention a test
 
 EXTRACT = f"""List every quiz, test, midterm and exam in this course syllabus that has a date \
 or a week, for the term starting the week of {TERM_WEEK1:%B %d, %Y}. Week 1 starts Monday \
@@ -156,6 +160,24 @@ def _onq(start, end):
             if i["kind"] == "quiz" or (i["kind"] == "event" and TEST_WORDS.search(i["title"]))]
 
 
+def _announcements():
+    """Announcements from the last ANNOUNCEMENT_DAYS that mention a test, newest first, cut
+    down to the sentences that do."""
+    since = datetime.now(TZ) - timedelta(days=ANNOUNCEMENT_DAYS)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        courses = onq.courses()
+        posted = pool.map(lambda c: onq.announcements(c, since), courses)
+        found = []
+        for c, notes in zip(courses, posted):
+            for n in notes:
+                sentences = [x for x in re.split(r"(?<=[.!?])\s+", n["text"]) if TEST_WORDS.search(x)]
+                if sentences or TEST_WORDS.search(n["title"]):
+                    found.append({"course": onq.short_code(c), "posted": f"{n['when']:%a %b} {n['when'].day}",
+                                  "title": n["title"], "about tests": " ".join(sentences)[:SNIPPET_CHARS],
+                                  "at": n["when"]})
+    return [n for n in sorted(found, key=lambda n: n.pop("at"), reverse=True)]
+
+
 def _same(a, b):
     """Whether two entries are the same test: same course, and the same day or the same
     numbered test of the same kind ("Online Quiz #1" opening Oct 26 and closing Nov 1)."""
@@ -209,7 +231,14 @@ def _when(t):
       days={"type": "integer", "minimum": 1, "maximum": 120, "description": "How many days to cover"})
 def get_tests(start_date, days):
     start = datetime.combine(date.fromisoformat(start_date), time(), TZ)
-    found = tests(start, start + timedelta(days=days))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        found, news = pool.submit(tests, start, start + timedelta(days=days)), pool.submit(_announcements)
+        found = found.result()
+        try:
+            news = news.result()
+        except Exception as e:  # the tests themselves are still worth saying
+            log.warning("announcements: %s", e)
+            news = None
     counts = {k: sum(t["kind"] == k for t in found) for k in KINDS}
     parts = [_plural(n, k) for k, n in counts.items() if n]
     return {
@@ -219,6 +248,9 @@ def get_tests(start_date, days):
                    not in t["title"] else t["title"], "kind": t["kind"], "when": _when(t),
                    "location": t.get("location"), "weight": t.get("weight"),
                    "from": ", ".join(t["sources"])} for t in found],
+        "announcements": "couldn't check" if news is None else "none about tests" if not news else
+        {"note": onq.CONTENT.strip() + " Mention any that move, add or cancel a test above, or "
+                 "give its room or time (16:30 is four thirty).", "posts": news},
     }
 
 
