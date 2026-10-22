@@ -18,6 +18,12 @@ CPU+=",+abm,+adx,+aes,+apic,+arat,+bmi1,+bmi2,+clflush,+cmov,+cx8,+cx16,+de,+erm
 CPU+=",+fsgsbase,+fxsr,+invpcid,+invtsc,+lahf-lm,+lm,+mca,+mce,+mmx,+movbe,+msr,+mtrr,+nx,+pae"
 CPU+=",+pat,+pge,+pse,+popcnt,+pse36,+rdrand,+rdtscp,+sep,+smep,+syscall,+tsc,+vaes,+vpclmulqdq"
 CPU+=",+xgetbv1,+xsave,+xsaveopt,-pcid,+tsc-deadline"
+# The macOS installer disk, only when (re)installing: RECOVERY=1 run.sh
+RECOVERY_ARGS=""
+if [ "${RECOVERY:-0}" = 1 ]; then
+    RECOVERY_ARGS="-device ide-hd,bus=ahci.1,drive=RecoveryImage"
+    RECOVERY_ARGS+=" -drive id=RecoveryImage,if=none,format=raw,file=RecoveryImage.img"
+fi
 
 exec qemu-system-x86_64 \
   -name macos-monterey,process=macos-monterey \
@@ -35,8 +41,7 @@ exec qemu-system-x86_64 \
   -device ahci,id=ahci \
   -device ide-hd,bus=ahci.0,drive=BootLoader,bootindex=0 \
   -drive id=BootLoader,if=none,format=qcow2,file=OpenCore.qcow2 \
-  -device ide-hd,bus=ahci.1,drive=RecoveryImage \
-  -drive id=RecoveryImage,if=none,format=raw,file=RecoveryImage.img \
+  $RECOVERY_ARGS \
   -device virtio-blk-pci,drive=SystemDisk \
   -drive id=SystemDisk,if=none,format=qcow2,file=disk.qcow2,discard=unmap,detect-zeroes=unmap \
   -monitor unix:monitor.sock,server,nowait -qmp unix:qmp.sock,server,nowait \
