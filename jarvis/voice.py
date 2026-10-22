@@ -10,11 +10,13 @@ import re
 import threading
 import time
 import wave
+from datetime import datetime
 
 import numpy as np
 import sounddevice as sd
 
-from jarvis import audio, config, latency, llm, notify, project, stt, tools, tts
+from jarvis import audio, config, latency, learn, llm, notify, project, stt, tools, tts
+from jarvis.tools.clock import TZ
 from jarvis.wakeword import WakeWord
 
 log = logging.getLogger("jarvis.voice")
@@ -84,6 +86,55 @@ _CONTINUE = re.compile(_FILLER + r"(?:continue|keep going|go on|carry on|resume|
 
 def is_continue_request(text):
     return bool(_CONTINUE.fullmatch(_words(text)))
+
+
+# Asking just the time or the date: answered here from the clock. Claude would look the time up
+# with a tool even though every request tells it (two round trips, about 1.5 s). Like repeat
+# requests, the whole utterance must match, so "what time is my class" still goes to Claude.
+_TIME = re.compile(_FILLER + r"(?:what time is it|what s the time|what is the time|"
+                   r"do you know what time it is|(?:tell me )?the time|time check)"
+                   r"(?: now| right now)?(?: please| jarvis| sir)*")
+_DATE = re.compile(_FILLER + r"(?:what s the date|what is the date|what s today s date|"
+                   r"what is today s date|what day is it)"
+                   r"(?: today)?(?: please| jarvis| sir)*")
+_UNITS = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+          "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+          "eighteen", "nineteen"]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty"]
+_ORDINAL = {"one": "first", "two": "second", "three": "third", "five": "fifth", "eight": "eighth",
+            "nine": "ninth", "twelve": "twelfth", "twenty": "twentieth", "thirty": "thirtieth"}
+
+
+def _number(n):
+    return _UNITS[n] if n < 20 else _TENS[n // 10] + (f" {_UNITS[n % 10]}" if n % 10 else "")
+
+
+def _ordinal(n):
+    words = _number(n).split()
+    last = words[-1]
+    words[-1] = _ORDINAL.get(last) or (last[:-1] + "ieth" if last.endswith("y") else last + "th")
+    return " ".join(words)
+
+
+def clock_words(t):
+    """The time the way the owner wants it said: "ten oh five", "twelve thirty", "nine
+    o'clock"; never "half past", "quarter to" or "noon"."""
+    hour = _number(t.hour % 12 or 12)
+    if t.minute == 0:
+        return f"{hour} o'clock"
+    return f"{hour} {'oh ' if t.minute < 10 else ''}{_number(t.minute)}"
+
+
+def local_answer(text):
+    """The reply to a bare time or date question, or None for anything else."""
+    words, now = _words(text), datetime.now(TZ)
+    if _TIME.fullmatch(words):
+        part = ("in the morning" if 5 <= now.hour < 12 else "in the afternoon" if 12 <= now.hour < 17
+                else "in the evening" if 17 <= now.hour < 22 else "at night")
+        return f"It's {clock_words(now)} {part}."
+    if _DATE.fullmatch(words):
+        return f"It's {now:%A}, {now:%B} the {_ordinal(now.day)}."
+    return None
 
 
 # Leaving project mode. Like repeat requests, the whole utterance must match.
@@ -312,6 +363,16 @@ def _answer(mic, brain, utterance, follow_up, turn):
         turn.outcome = "continued" if done else "stopped"
         return done
     _unfinished = None  # a new request: whatever was cut off before is dropped
+    # Not in the follow-up window, where it may be someone else asking: Claude judges that.
+    if not follow_up and (reply := local_answer(text)) is not None:
+        log.info("answering locally: %s", reply)
+        with _speaker:
+            _, stopped = _speak(mic, [reply], timing=turn)
+        mic.clear()
+        _last_reply = turn.reply = reply
+        turn.outcome = "stopped" if stopped else "answered locally"
+        learn.log_exchange("voice", text, reply, [reply], [], follow_up)
+        return not stopped
     # With a project open, Claude still hears everything first: it passes on what's about the
     # project's work (project_message) and answers the rest itself.
     p = project.voice_project()
