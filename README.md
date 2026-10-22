@@ -304,7 +304,10 @@ restart Jarvis, and update the connector's URL.
 ## Status
 
 Done: TTS, STT (GPU), Claude with tools, wake word + end-of-speech detection, full pipeline,
-systemd service, Discord bot. Next (JarvisP2): Google Calendar, Sheets, Gmail, OnQ, briefings.
+systemd service, Discord bot, Apple Calendar, Gmail, the job-search sheet, Trello, OnQ and Smith
+Learning, briefings and reminders, Claude Code alerts, the MCP server, learning mode, project
+mode. Ready but waiting for your sign-in: Spotify, OneDrive, iMessage/SMS (the Mac VM). Ideas
+for the Windows laptop (seeing its screen, editing and running work there): docs/other-laptop.md.
 
 ## Project mode
 
