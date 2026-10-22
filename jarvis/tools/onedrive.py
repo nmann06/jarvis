@@ -117,7 +117,8 @@ def onedrive_search(query):
     return out or f"Nothing in OneDrive matches {query!r}."
 
 
-@tool("Read the text of a file in OneDrive (Word, PDF, text, Markdown, CSV).",
+@tool("Read the text of a file in OneDrive: Word, PDF, Jupyter notebooks, and any text or code "
+      "file (Markdown, CSV, Python, MATLAB, C, LaTeX...).",
       path={"type": "string", "description": "File path from the top of OneDrive"})
 def onedrive_read(path):
     data = _graph("GET", _item(path) + "/content", raw=True).content
@@ -128,10 +129,14 @@ def onedrive_read(path):
     elif name.endswith(".pdf"):
         import pypdf
         text = "\n".join(page.extract_text() or "" for page in pypdf.PdfReader(io.BytesIO(data)).pages)
-    elif name.endswith((".txt", ".md", ".csv", ".json", ".py", ".m", ".c", ".h", ".tex")):
+    elif name.endswith(".ipynb"):  # a Jupyter notebook: its cells, without the outputs
+        cells = json.loads(data).get("cells", [])
+        text = "\n\n".join(f"[{c.get('cell_type')} cell]\n" + "".join(c.get("source", []))
+                           for c in cells)
+    elif b"\x00" not in data[:8192]:  # text of any kind: notes, code, CSV, LaTeX, MATLAB...
         text = data.decode(errors="replace")
     else:
-        raise ValueError("Jarvis can read Word, PDF and plain-text files, not this one")
+        raise ValueError("Jarvis can read Word, PDF, notebooks and text or code files, not this one")
     return text[:MAX_TEXT] + ("\n[...cut off]" if len(text) > MAX_TEXT else "")
 
 

@@ -328,10 +328,14 @@ Claude Code session per project.
   when it starts, an update about once a minute or when it finds something, and a short summary
   at the end. Jarvis says those between conversations, and "still working on it" after two
   quiet minutes. Everything it writes goes to a thread in #jarvis.
-- **Talking to it:** by voice, what you say after "Hey Jarvis" goes to the project until you say
-  "end project" (which also stops a run in progress). Messages sent mid-run wait for it to
-  finish. Writing in the project's Discord thread sends to it too. "Resume the ... project"
-  reopens one; "what projects do I have" lists them.
+- **Talking to it:** while a project is open, ask Jarvis anything as usual. Questions and
+  instructions about the project's work ("what does question two ask?", "check my code for
+  part three", "is my answer to question three right?") are passed to Claude Code, which reads
+  your files (OneDrive, OnQ) and answers aloud; anything else (the time, weather, calendar,
+  email, general questions) Jarvis answers itself. "End project" closes it (and stops a run in
+  progress). Messages sent mid-run wait for it to finish. Writing in the project's Discord
+  thread sends to it too. "Resume the ... project" reopens one; "what projects do I have"
+  lists them.
 
 It shares the Pro plan's usage limits with your own Claude Code use (Sonnet by default,
 `PROJECT_MODEL`). Needs `MCP_TOKEN` set for the Jarvis tools (it is).
@@ -340,7 +344,7 @@ It shares the Pro plan's usage limits with your own Claude Code use (Sonnet by d
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
-(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `resume_project` / `list_projects` (project mode, above), OnQ and Smith Learning (read-only):
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `project_message` / `resume_project` / `list_projects` (project mode, above), OnQ and Smith Learning (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
 `onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`),
 `onq_content` (everything posted under Content, plus pages linked from module descriptions, as some

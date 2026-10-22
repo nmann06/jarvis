@@ -5,8 +5,8 @@ the owner's Claude plan instead of the API.
 continuing the same Claude Code session for every later message (--resume). Everything Claude
 Code writes is posted in a Discord thread; whatever it puts inside <say>...</say> is also
 spoken when the project was started by voice, so the owner hears updates while it works. While
-a voice project is open, what the owner says to Jarvis goes to the project until they say
-"end project".
+a voice project is open, Jarvis's Claude is told so each turn: it passes on what's about the
+project's work (project_message) and answers anything else itself, until "end project".
 
 Claude Code gets Jarvis's own tools through the MCP server (jarvis.mcp_server): reading OnQ,
 the calendar and notes, and making folders and saving new files in OneDrive, where each project
@@ -232,6 +232,12 @@ def _load(slug):
         return _projects[slug]
 
 
+def latest():
+    """The most recently used saved project, or None."""
+    files = sorted(PROJECTS.glob("*/jarvis-project.json"), key=lambda f: f.stat().st_mtime)
+    return _load(files[-1].parent.name) if files else None
+
+
 def all_names():
     """Saved projects, most recently used first."""
     files = sorted(PROJECTS.glob("*/jarvis-project.json"), key=lambda f: f.stat().st_mtime,
@@ -261,6 +267,18 @@ def start(name, task, voice, folder=""):
         open_for_voice(p)
     p.send(task)
     return p
+
+
+def context(p):
+    """What Jarvis's Claude is told each turn while project p is open by voice."""
+    where = f" (its OneDrive folder is {p.folder})" if p.folder else ""
+    return (f"Project mode is on: the owner is working on the project \"{p.name}\"{where}, which "
+            "Claude Code is handling. If what they say is about that work (a question about "
+            "their homework, lab, code or files for it, or something for the project to do), "
+            "pass it on with project_message and only say in a few words that you have; Claude "
+            "Code reads their files, works it out and answers aloud itself. Answer anything "
+            "else yourself as usual (time, weather, calendar, email, general questions). \"End "
+            "project\" leaves project mode.")
 
 
 def open_for_voice(p):

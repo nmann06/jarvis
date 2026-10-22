@@ -162,22 +162,23 @@ class Brain:
                  time.perf_counter() - start, u.cache_read_input_tokens or 0,
                  u.cache_creation_input_tokens or 0)
 
-    def ask(self, text, follow_up=False, on_text=None, timing=None, on_tool=None):
+    def ask(self, text, follow_up=False, on_text=None, timing=None, on_tool=None, context=None):
         """on_text, if given, is called with each bit of Claude's text as it is written, and
         on_tool with a tool's name as Claude starts calling it (else on_text gets "\n" then,
         as what it said before the call is complete). timing (a latency.Turn), if given,
-        records each request and tool call."""
+        records each request and tool call. context is a note for this turn only (e.g. which
+        project is open)."""
         # A Claude session's timers are posted: the owner may be away from the laptop.
         token = notify.channel.set("discord" if self.channel == "claude" else self.channel)
         trace = {"said": [], "tools": []}  # for learning mode
         try:
-            reply = self._ask(text, follow_up, on_text, timing, on_tool, trace)
+            reply = self._ask(text, follow_up, on_text, timing, on_tool, trace, context)
         finally:
             notify.channel.reset(token)
         learn.log_exchange(self.channel, text, reply, trace["said"], trace["tools"], follow_up)
         return reply
 
-    def _ask(self, text, follow_up, on_text, timing, on_tool, trace):
+    def _ask(self, text, follow_up, on_text, timing, on_tool, trace, context):
         """Send the owner's words to Claude, running any tools it calls. Returns the reply.
 
         follow_up means it was heard without the wake word; Claude may then decide it wasn't
@@ -195,6 +196,8 @@ class Brain:
         tomorrow = datetime.now(TZ) + timedelta(days=1)
         note = (f"It is now {get_time_and_date()} (local time), so tomorrow is "
                 f"{tomorrow:%A %d %B}; no tool is needed for the current time or date.")
+        if context:
+            note += "\n\n" + context
         if follow_up:
             note += "\n\n" + FOLLOW_UP_NOTE
         messages.append({"role": "system", "content": note})

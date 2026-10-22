@@ -123,6 +123,7 @@ class _Sentences:
         self._queue, self._buffer, self.spoken = queue.Queue(), "", []
         self.done = threading.Event()  # set once Claude has finished and spoken is complete
         self._held = False  # said "One moment." already this reply
+        self.tools = []  # names of the tools Claude called
 
     def add(self, text):
         self._buffer += text
@@ -135,6 +136,7 @@ class _Sentences:
         calendar.") is spoken while the tool runs. Haiku sometimes thinks out loud there
         instead ("I need tomorrow's date, so I'll check your calendar first."), so that, or
         anything over PREAMBLE_WORDS words, becomes "One moment." (only once a reply)."""
+        self.tools.append(name)
         preamble, self._buffer = self._buffer.strip(), ""
         if _THINKING_ALOUD.search(preamble) or len(preamble.split()) > PREAMBLE_WORDS:
             log.info("before %s, said 'One moment.' instead of: %s", name, preamble)
@@ -309,14 +311,18 @@ def _answer(mic, brain, utterance, follow_up, turn):
         turn.outcome = "continued" if done else "stopped"
         return done
     _unfinished = None  # a new request: whatever was cut off before is dropped
-    if (p := project.voice_project()) is not None:
-        return _to_project(mic, p, text, turn)
+    # With a project open, Claude still hears everything first: it passes on what's about the
+    # project's work (project_message) and answers the rest itself.
+    p = project.voice_project()
+    if p is not None and _END_PROJECT.fullmatch(_words(text)):
+        return _end_project(mic, p, turn)
     sentences, result = _Sentences(), {}
 
     def think():
         try:
             result["reply"] = brain.ask(text, follow_up=follow_up, on_text=sentences.add,
-                                        timing=turn, on_tool=sentences.tool)
+                                        timing=turn, on_tool=sentences.tool,
+                                        context=project.context(p) if p else None)
         except Exception as e:
             result["error"] = e
         finally:
@@ -350,25 +356,24 @@ def _answer(mic, brain, utterance, follow_up, turn):
     turn.outcome = "answered"
     log.info("jarvis: %s", _last_reply)
     mic.clear()  # drop Jarvis's own voice picked up by the mic
+    if "project_message" in sentences.tools or "start_project" in sentences.tools:
+        turn.outcome = "to project"
+        return False  # no follow-up window, so the project's answer is said as soon as it comes
     return True
 
 
-def _to_project(mic, p, text, turn):
-    """In project mode, what the owner says goes to Claude Code instead of Jarvis's Claude."""
+def _end_project(mic, p, turn):
+    """ "End project": stop what's running and go back to plain Jarvis."""
     global _last_reply
-    if _END_PROJECT.fullmatch(_words(text)):
-        project.end_voice()
-        reply = f"Closed the {p.name} project. Back to normal, sir."
-    else:
-        reply = ("Got it. I'll pass that on when it finishes what it's doing." if p.send(text)
-                 else "On it.")
+    project.end_voice()
+    reply = f"Closed the {p.name} project. Back to normal, sir."
     with _speaker:
         _speak(mic, [reply], timing=turn)
     _last_reply = turn.reply = reply
-    turn.outcome = "to project"
+    turn.outcome = "ended project"
     log.info("jarvis (project %s): %s", p.slug, reply)
     mic.clear()
-    return False  # no follow-up window: the project's updates come in between conversations
+    return False
 
 
 def _speak_updates(mic):
