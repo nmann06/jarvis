@@ -35,7 +35,7 @@ from an earlier turn (adding an event, setting a timer, saving a note) unless as
 again: "say that again" means repeat what you said, not what you did. Tests, quizzes, \
 midterms and exams all mean the same thing: for any of them use get_tests, start with its \
 summary ("Next week you have two quizzes and one test."), then give each with its day and \
-time. "My next midterm" (or quiz, or test) is simply the earliest one, whatever it is called. If no tool can do what \
+time. "My next midterm" (or quiz, or test) is simply the earliest one, whatever it is called. Give when things start, never when they end, unless asked. If no tool can do what \
 was asked, say so instead of guessing. Do not include internal or system XML tags in your response."""
 
 STYLES = {
@@ -56,6 +56,8 @@ likely meaning.""",
     "discord": """You are chatting with the owner in Discord direct messages. Keep replies short \
 and conversational, like a text message. Light Discord markdown (bold, bullet lists) is fine \
 when it helps; no headings.""",
+    "terminal": """The owner is typing to you in a terminal on one of their laptops. Reply in \
+plain text, short and direct, with no markdown; short lists one item per line are fine.""",
     "claude": """These messages come from another Claude assistant that the owner is using on \
 one of their devices, through your MCP connection, not from the owner directly. Reply in plain \
 text with everything it needs to pass on or act on: complete details (dates, times, names, \
@@ -91,18 +93,19 @@ def _thinking():
 
 
 class Brain:
-    """One conversation with Claude. channel ("voice" or "discord") sets the reply style and
-    where alerts from tools such as timers are delivered."""
+    """One conversation with Claude. channel ("voice", "discord", "claude" or "terminal") sets
+    the reply style and where alerts from tools such as timers are delivered; style, if given,
+    is a different channel's reply style (the terminal's `jarvis -a` replies to be spoken)."""
 
-    def __init__(self, channel="voice"):
-        self.channel = channel
+    def __init__(self, channel="voice", style=None):
+        self.channel, self.style = channel, style or channel
         # The system prompt changes only when learning mode adds a lesson (the time goes in
         # each turn instead), so it is cached along with the tools ahead of it. Each request
         # also caches itself as a whole (cache_control in _ask), so the next one in the
         # conversation reads that prefix back.
         self._system, self._lessons = None, False
         self._refresh_system()
-        self._max_tokens = config.MAX_TOKENS if channel == "voice" else config.MAX_TOKENS_DISCORD
+        self._max_tokens = config.MAX_TOKENS if self.style == "voice" else config.MAX_TOKENS_DISCORD
         # Idle connections are normally dropped after 5 s; keep them for a minute, so the one
         # prewarm() opens is still there when the owner finishes talking.
         self._client = anthropic.Anthropic(http_client=anthropic.DefaultHttpxClient(
@@ -123,8 +126,8 @@ class Brain:
         version = learn.version()
         if version == self._lessons:
             return
-        lessons = learn.instructions(self.channel)
-        text = SYSTEM.format(style=STYLES[self.channel]) + (f"\n\n{lessons}" if lessons else "")
+        lessons = learn.instructions(self.style)
+        text = SYSTEM.format(style=STYLES[self.style]) + (f"\n\n{lessons}" if lessons else "")
         self._system = [{"type": "text", "text": text, "cache_control": CACHE}]
         self._lessons = version
 
@@ -171,7 +174,7 @@ class Brain:
         records each request and tool call. context is a note for this turn only (e.g. which
         project is open)."""
         # A Claude session's timers are posted: the owner may be away from the laptop.
-        token = notify.channel.set("discord" if self.channel == "claude" else self.channel)
+        token = notify.channel.set("discord" if self.channel in ("claude", "terminal") else self.channel)
         asker = tools.asker.set(self.channel)
         tools.turn += 1
         trace = {"said": [], "tools": []}  # for learning mode
