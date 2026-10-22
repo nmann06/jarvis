@@ -24,8 +24,8 @@ Already set up: `~/.bashrc` has the `jarvis` command (open a new terminal, or `s
 
 2. The `jarvis` command, added to your PowerShell profile:
 
-       Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-       if (!(Test-Path $PROFILE)) { New-Item -Force $PROFILE }
+       Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+       New-Item -Force -ItemType Directory (Split-Path $PROFILE) | Out-Null
        ssh nate@100.71.163.55 cat ~/jarvis/deploy/jarvis.ps1 | Add-Content $PROFILE
        . $PROFILE
 
