@@ -10,13 +10,12 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
 
 import anthropic
 import httpx2
 
 from jarvis import config, learn, notify, tools
-from jarvis.tools.clock import TZ, get_time_and_date
+from jarvis.tools.clock import get_time_and_date
 
 log = logging.getLogger(__name__)
 
@@ -195,10 +194,8 @@ class Brain:
         # like "what's on tomorrow". It goes after the owner's words, not in the system prompt,
         # so everything before them stays cached. A system message rather than text in the
         # user turn, so it (and the follow-up note) can't read as the owner's words.
-        # Tomorrow too: otherwise Claude may work it out aloud ("I need tomorrow's date, so...").
-        tomorrow = datetime.now(TZ) + timedelta(days=1)
-        note = (f"It is now {get_time_and_date()} (local time), so tomorrow is "
-                f"{tomorrow:%A %d %B}; no tool is needed for the current time or date.")
+        note = (f"It is now {get_time_and_date()} (local time); no tool is needed for the "
+                "current time or date.")
         if context:
             note += "\n\n" + context
         if follow_up:

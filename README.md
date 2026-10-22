@@ -48,6 +48,9 @@ when Claude needs a tool (measured on this laptop). What keeps it there, in the 
 - **No wasted round trips.** A long tool call (a note, an email draft, six calendar events) is no
   longer cut off at the spoken-reply limit and asked for again. "Hey Jarvis" said again in the
   follow-up window gets the chime, as a wake does, rather than a trip to Claude for "Yes, sir?".
+  Asking just the time or the date ("what time is it?", "what's the date?") right after the wake
+  word is answered from the clock (Claude would look the time up with a tool first: two round
+  trips, about 1.5 s); anything more, like "what time is my class?", still goes to Claude.
 
 ### Where the time goes
 
