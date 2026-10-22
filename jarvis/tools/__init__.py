@@ -68,5 +68,5 @@ def warm_up():
 
 # Import the tool modules so their @tool decorators run.
 from jarvis.tools import (clock, gmail, icloud_calendar, notes, sheets, system,  # noqa: E402,F401
-                          imessage, onedrive, onq, projects, spotify, timers,
+                          assessments, imessage, onedrive, onq, projects, spotify, timers,
                           trello, weather)
