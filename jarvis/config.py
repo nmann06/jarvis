@@ -22,6 +22,9 @@ MAX_TOKENS_DISCORD = int(os.getenv("MAX_TOKENS_DISCORD", "2000"))  # text replie
 CLAUDE_EFFORT = os.getenv("CLAUDE_EFFORT", "low")  # low/medium/high: more thinking = slower
 CLAUDE_THINKING = os.getenv("CLAUDE_THINKING", "off") == "on"  # thinking before replying
 HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "10"))  # past exchanges sent with each request
+# Send each Claude request twice at once and use whichever starts answering first: cuts the
+# occasional 1.5-3 s wait for a reply to start, for a little more API cost.
+CLAUDE_RACE = os.getenv("CLAUDE_RACE", "on") == "on"
 
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "on") == "on"
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")

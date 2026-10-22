@@ -86,6 +86,24 @@ def is_continue_request(text):
     return bool(_CONTINUE.fullmatch(_words(text)))
 
 
+# Only the wake word ("Hey Jarvis?", "Jarvis"): often said in the follow-up window by someone
+# who thinks Jarvis has stopped listening. Treated as a wake: the chime, then listening, with
+# no trip to Claude for a "Yes, sir?".
+_WAKE_ONLY = re.compile(r"(?:(?:hey|hi|ok|okay|yo) )?jarvis(?: jarvis)*")
+WOKEN = "woken"  # handle()'s answer for it
+
+
+def is_wake_only(text):
+    return bool(_WAKE_ONLY.fullmatch(_words(text)))
+
+
+# "Hey Jarvis, ..." or "Jarvis, ..." in the follow-up window is plainly meant for Jarvis, so
+# Claude isn't asked to judge whether it was (and can't wrongly decide it wasn't).
+_ADDRESSED = re.compile(r"\s*(?:(?:hey|hi|ok|okay|yo)\s+jarvis\b|jarvis\s*[,.!?])", re.I)
+
+PREAMBLE_WORDS = 6  # longest thing said before a tool call that is spoken as it is
+
+
 class _Sentences:
     """Claude's reply as it streams in, handed out one whole sentence at a time so speech can
     start before Claude has finished. Iterating blocks until close()."""
@@ -93,12 +111,24 @@ class _Sentences:
     def __init__(self):
         self._queue, self._buffer, self.spoken = queue.Queue(), "", []
         self.done = threading.Event()  # set once Claude has finished and spoken is complete
+        self._held = False  # said "One moment." already this reply
 
     def add(self, text):
         self._buffer += text
         *done, self._buffer = re.split(r"(?<=[.!?])\s+|\n+", self._buffer)
         for sentence in done:
             self._put(sentence)
+
+    def tool(self, name):
+        """Claude has started calling a tool: what it said just before ("Checking your
+        calendar.") is spoken while the tool runs. Haiku sometimes thinks out loud there
+        instead ("I need tomorrow's date, so I'll check your calendar first."), so anything
+        over PREAMBLE_WORDS words becomes "One moment." (only once a reply)."""
+        preamble, self._buffer = self._buffer.strip(), ""
+        if len(preamble.split()) > PREAMBLE_WORDS:
+            log.info("before %s, said 'One moment.' instead of: %s", name, preamble)
+            preamble, self._held = "" if self._held else "One moment.", True
+        self._put(preamble)
 
     def close(self):
         self._put(self._buffer)
@@ -250,6 +280,12 @@ def _answer(mic, brain, utterance, follow_up, turn):
         turn.outcome = "nothing heard"
         return False
     log.info("you: %s", text)
+    if is_wake_only(text):
+        log.info("just the wake word: listening again")
+        turn.outcome = "woken again"
+        return WOKEN
+    if follow_up and _ADDRESSED.match(text):
+        follow_up = False  # "Jarvis, ..." is meant for Jarvis
     if _last_reply and is_repeat_request(text):
         log.info("repeating last reply (local, no Claude)")
         with _speaker:
@@ -267,7 +303,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
     def think():
         try:
             result["reply"] = brain.ask(text, follow_up=follow_up, on_text=sentences.add,
-                                        timing=turn)
+                                        timing=turn, on_tool=sentences.tool)
         except Exception as e:
             result["error"] = e
         finally:
@@ -329,7 +365,14 @@ def run():
             follow_up = False
             # Follow-up window: after a reply, listen again without needing the wake word.
             # Claude decides whether what it hears there was meant for Jarvis.
-            while utterance is not None and handle(mic, brain, utterance, follow_up):
+            while utterance is not None:
+                answered = handle(mic, brain, utterance, follow_up)
+                if answered == WOKEN:  # just "Hey Jarvis" again: chime and listen, as for a wake
+                    play(CHIME)
+                    utterance, follow_up = audio.record_utterance(mic, stt.transcribe), False
+                    continue
+                if not answered:
+                    break
                 utterance = audio.record_utterance(mic, stt.transcribe,
                                                    wait_seconds=config.FOLLOW_UP_SECONDS)
                 follow_up = True

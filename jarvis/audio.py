@@ -82,10 +82,13 @@ _TRAILING = {"uh", "um", "er", "erm", "hmm", "mm", "so", "and", "but", "or", "th
 def sounds_finished(text):
     """Whisper ends a finished sentence with . ? or !, and leaves one that trails off bare or
     with "...". Only real requests count: not "Jarvis." or "Um."."""
-    words = [w for w in re.findall(r"[a-z']+", text.lower()) if w not in ("hey", "jarvis")]
+    # Numbers count as words: "How much is the test worth for 3-2-4?" doesn't end on "for".
+    words = [w for w in re.findall(r"[a-z0-9']+", text.lower()) if w not in ("hey", "jarvis")]
     text = text.strip()
-    return (len(words) >= 2 and text[-1:] in ".?!" and not text.endswith("..")
-            and words[-1] not in _TRAILING)
+    if len(words) < 2 or text[-1:] not in ".?!" or text.endswith(".."):
+        return False
+    # A question can end on "like" ("What's the weather like?") but no other trailing word.
+    return words[-1] not in _TRAILING or (words[-1] == "like" and text.endswith("?"))
 
 
 class Utterance:

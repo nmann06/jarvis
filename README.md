@@ -12,12 +12,13 @@ machine itself; only the text of what you say is sent to Claude.
 
 ## Speed
 
-From you going quiet to Jarvis's voice takes about 1.5-1.8 s for a plain question and 2.5-3 s
+From you going quiet to Jarvis's voice takes about 1.4-1.8 s for a plain question and 2.5-3 s
 when Claude needs a tool (measured on this laptop). What keeps it there, in the order it happens:
 
 - **A short pause when you're done.** A request that sounds finished (Whisper ends it with `.`,
-  `?` or `!`, and not on a word like "to", "and" or "um") ends after 0.5 s of quiet
-  (`QUICK_SILENCE_SECONDS`); anything else waits 0.8 s (`SILENCE_SECONDS`).
+  `?` or `!`, and not on a word like "to", "and" or "um", though a question may end on "like")
+  ends after 0.5 s of quiet (`QUICK_SILENCE_SECONDS`); anything else waits 0.8 s
+  (`SILENCE_SECONDS`).
 - **Transcription during that pause.** Whisper starts 0.24 s into any pause, so the text is ready
   when the pause turns out to be the end: its 0.27 s (nearly the same for any length, as it
   always encodes a 30 s window) usually adds nothing. It is warmed up at startup, since its
@@ -26,15 +27,27 @@ when Claude needs a tool (measured on this laptop). What keeps it there, in the 
   after your words), so they're cached, and each request caches the conversation for the next.
   On "Hey Jarvis" a `max_tokens=0` request loads the conversation so far into the cache while
   you're still talking: Claude's first word comes 0.65-0.9 s after the request instead of about
-  0.95 s (up to 1.35 s). Having the time there also saves a tool call to look it up.
+  0.95 s (up to 1.35 s). The cache lasts an hour rather than 5 minutes, since talking to Jarvis
+  comes in bursts. Old turns are dropped only as a conversation starts or once 5 extra have
+  piled up (`HISTORY_TURNS`): dropping one every turn changed the start of the conversation, so
+  none of it could be read from the cache, which costs about 0.25 s on a 20k-token conversation.
+- **Two requests at once.** Now and then the API takes 1.3-3 s rather than 0.6-0.8 s to start a
+  reply, and it happens to one request at a time, so each request goes out twice and Jarvis
+  follows whichever starts first (`CLAUDE_RACE`; it costs a little more).
 - **A connection kept open.** Idle connections to the API are kept for 60 s rather than 5, so the
   request reuses the one the pre-warm opened.
 - **Speaking while Claude writes.** Speech starts with the first sentence (Piper takes 0.03-0.23 s
   for it) while Claude writes the rest, and words said before a tool call ("Checking your
-  calendar.") are spoken as soon as the call starts.
-- **Faster tools.** Email search fetches the messages in one batched request (2.5 s -> 0.6 s for
-  ten), OnQ due work asks for every course at once (1.5-2.5 s -> 0.3-0.4 s), and calendar
-  queries go to every calendar at once.
+  calendar.") are spoken as soon as the call starts. If Claude thinks out loud there instead
+  ("I need tomorrow's date, so I'll check..."), anything over six words is said as "One moment."
+- **Faster tools.** Tools for different services in one reply (OnQ and the calendar, say) run at
+  the same time. Email search fetches the messages in one batched request (2.5 s -> 0.6 s for
+  ten), OnQ due work asks for every course at once (1.5-2.5 s -> 0.3-0.4 s), calendar queries go
+  to every calendar at once, and the calendar no longer tries HTTP/3 first, which iCloud
+  advertises but doesn't answer (a query after a few idle minutes: 1.4 s -> 0.45 s).
+- **No wasted round trips.** A long tool call (a note, an email draft, six calendar events) is no
+  longer cut off at the spoken-reply limit and asked for again. "Hey Jarvis" said again in the
+  follow-up window gets the chime, as a wake does, rather than a trip to Claude for "Yes, sir?".
 
 ### Where the time goes
 
@@ -84,7 +97,8 @@ The unit file is `deploy/jarvis.service`, linked into `~/.config/systemd/user/`.
 
 Voice: say "Hey Jarvis", wait for the chime, then speak. After each reply it listens for 5 s for
 a follow-up without the wake word. Claude is told the follow-up came without the wake word and
-ignores it if it sounds like you're talking to someone else. A falling chime means it has gone
+ignores it if it sounds like you're talking to someone else; starting with "Jarvis, ..." means
+it's always answered, and "Hey Jarvis" on its own gets the chime again. A falling chime means it has gone
 back to waiting for "Hey Jarvis". "Say that again", "sorry?", "what did you say?" and similar
 replay the last reply word for word without asking Claude.
 
@@ -209,10 +223,11 @@ restart Jarvis, and update the connector's URL.
 | Setting | Default | Notes |
 |---|---|---|
 | `CLAUDE_MODEL` | `claude-haiku-5-5` | Any current Claude model id |
-| `MAX_TOKENS` | `300` | Caps reply length and cost (raise to ~1024 if thinking is on) |
+| `MAX_TOKENS` | `300` | Caps how long a spoken reply can be (counted as about 4 characters a token; tool calls such as long notes aren't limited by it) |
 | `CLAUDE_THINKING` | `off` | `on` lets Claude think first: slower, rarely better for this |
 | `CLAUDE_EFFORT` | `low` | `low` / `medium` / `high` |
-| `HISTORY_TURNS` | `10` | Past exchanges sent with each request |
+| `HISTORY_TURNS` | `10` | Past exchanges sent with each request (up to 5 more pile up before the oldest are dropped, so the conversation stays cached) |
+| `CLAUDE_RACE` | `on` | Send each Claude request twice at once and use whichever starts answering first |
 | `WHISPER_MODEL` | `large-v3-turbo` | `tiny.en` / `base.en` / `small.en` for CPU |
 | `WHISPER_DEVICE` | `cuda` | `cpu` uses int8 and `WHISPER_THREADS` |
 | `PIPER_VOICE` | `models/piper/en_GB-alan-medium.onnx` | |

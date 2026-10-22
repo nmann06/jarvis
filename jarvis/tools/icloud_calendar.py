@@ -22,9 +22,22 @@ def _get_calendars():
         client = caldav.DAVClient("https://caldav.icloud.com", username=config.ICLOUD_USER,
                                   password=config.ICLOUD_APP_PASSWORD, features="icloud",
                                   timeout=20)
+        _no_http3(client)
         _calendars = {c.get_display_name(): c for c in client.principal().calendars()
                       if _has_events(c)}
     return _calendars
+
+
+def _no_http3(client):
+    # iCloud advertises HTTP/3, but it fails, so after a few idle minutes the first query
+    # tried it, gave up and reconnected: 1.4 s instead of 0.45 s (measured).
+    try:
+        import niquests
+    except ImportError:
+        return  # caldav is on plain requests, which never tries HTTP/3
+    if isinstance(client.session, niquests.Session):
+        client.session.close()
+        client.session = niquests.Session(disable_http3=True)
 
 
 def connect():

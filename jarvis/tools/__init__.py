@@ -31,6 +31,13 @@ def tool(description, **properties):
     return register
 
 
+def service(name):
+    """The module a tool is in (calendar, Gmail, OnQ, ...). Calls to different ones can run
+    at the same time."""
+    fn = REGISTRY.get(name)
+    return fn.__module__ if fn else name
+
+
 def run(name, args):
     """Call a tool and return (result text, is_error). Errors go back to Claude, not up."""
     try:
