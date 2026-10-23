@@ -227,9 +227,10 @@ STOP_PHRASES = ["stop", "cancel", "stop it", "stop talking", "shut up", "be quie
 # phrases to choose from, an echoed "yes sir" came out as "stop".
 _DECOYS = ["sir", "yes sir", "no sir", "of course sir", "certainly sir", "please"]
 _vosk = None
-# Whisper checks this much of the end of a "stop" for echo: long enough for "but it stays",
-# short enough that Jarvis's echo doesn't drown out the owner's "stop".
-ECHO_CHECK_SECONDS = 1.5
+# Whisper checks the stop phrase where Vosk heard it, with this much either side, for echo.
+# Any more and Jarvis's echo drowns out the owner's "stop": with louder speakers, a 1.5 s
+# window heard only "raise the volume or is there something"; the stop itself was "Stop!".
+ECHO_CHECK_PAD = 0.1
 # Any of these in Whisper's words means the owner did say stop (not "it" from "stop it").
 _STOP_WORDS = {"stop", "cancel", "shut", "quiet", "enough", "forget", "nevermind"}
 
@@ -240,8 +241,10 @@ def _stop_recognizer():
     if _vosk is None:
         vosk.SetLogLevel(-1)
         _vosk = vosk.Model(str(config.VOSK_MODEL))
-    return vosk.KaldiRecognizer(_vosk, audio.SAMPLE_RATE,
-                                json.dumps(STOP_PHRASES + _DECOYS + ["[unk]"]))
+    rec = vosk.KaldiRecognizer(_vosk, audio.SAMPLE_RATE,
+                               json.dumps(STOP_PHRASES + _DECOYS + ["[unk]"]))
+    rec.SetWords(True)  # word times, so Whisper can check just the stop phrase
+    return rec
 
 
 def _stop_in(text):
@@ -254,22 +257,36 @@ def _stop_in(text):
     return None
 
 
+def _stop_clip(heard, rec_start, result, phrase):
+    """The audio of phrase in heard, from a Vosk result with word times (relative to
+    rec_start, the samples heard before that recognizer started)."""
+    words, p = result.get("result", []), phrase.split()
+    audio_heard = np.concatenate(heard)
+    for i in range(len(words) - len(p) + 1):
+        if [w["word"] for w in words[i:i + len(p)]] == p:
+            start = rec_start + int((words[i]["start"] - ECHO_CHECK_PAD) * audio.SAMPLE_RATE)
+            end = rec_start + int((words[i + len(p) - 1]["end"] + ECHO_CHECK_PAD)
+                                  * audio.SAMPLE_RATE)
+            return audio_heard[max(start, 0):end]
+    return audio_heard[rec_start:]  # no word times: all this recognizer heard
+
+
 def _word_list(text):
     return re.sub(r"[^a-z' ]+", " ", text.lower()).split()
 
 
-def _is_echo(heard, reply):
-    """Whether a stop Vosk heard was really Jarvis's own voice getting past the canceller
-    (Vosk heard "but it stays" as "stop"). Whisper hears words in context far better: if it
-    hears no stop word at the end of heard, but mostly words from reply, it was echo."""
-    clip = np.concatenate(heard)[-int(ECHO_CHECK_SECONDS * audio.SAMPLE_RATE):]
+def _is_echo(clip, reply):
+    """Whether a stop Vosk heard (clip, just the stop phrase) was really Jarvis's own voice
+    getting past the canceller (Vosk heard "but it stays" as "stop"). Whisper hears words far
+    better: if it hears no stop word there, but mostly words from reply, it was echo."""
     words = _word_list(stt.transcribe(clip.astype(np.float32) / 32768))
     if _STOP_WORDS & set(words):
         return False
     if "jarvis" in words and "jarvis" not in _word_list(reply):
         return False  # the owner's "Jarvis, stop": Jarvis doesn't say its own name
     echoed = [w for w in words if w in set(_word_list(reply))]
-    if len(words) >= 2 and len(echoed) * 2 > len(words):
+    # Half will do: "Thampon" echoed came out as "the stamp".
+    if words and len(echoed) * 2 >= len(words):
         log.info("heard a stop, but Whisper heard %r, my own words: ignored", " ".join(words))
         return True
     return False
@@ -279,7 +296,7 @@ def _listen_for_stop(mic, stop, done, saying, reply):
     """While Jarvis talks, listen on the (echo-cancelled) mic for "stop" or "cancel" and set
     stop when heard. saying() is what Jarvis is saying now, reply() the whole reply so far.
     Runs until done is set."""
-    rec, heard = _stop_recognizer(), []
+    rec, heard, rec_start = _stop_recognizer(), [], 0  # rec_start: samples heard before rec
     try:
         while not done.is_set():
             block = mic.read(timeout=0.1)
@@ -289,23 +306,24 @@ def _listen_for_stop(mic, stop, done, saying, reply):
             # Act on the partial result too: Vosk only finishes an utterance after a pause,
             # which may not come while Jarvis is still talking.
             if rec.AcceptWaveform(block.tobytes()):
-                text = json.loads(rec.Result())["text"]
+                result = json.loads(rec.Result())
             else:
-                text = json.loads(rec.PartialResult())["partial"]
-                if _stop_in(text):
+                result = {"text": json.loads(rec.PartialResult())["partial"]}
+                if _stop_in(result["text"]):
                     # A partial "stop" is usually echo or noise that Vosk drops once it decodes
                     # the whole utterance, so make it decide now (this also starts a new one).
-                    text = json.loads(rec.FinalResult())["text"]
+                    result = json.loads(rec.FinalResult())
+            text = result["text"]
             if phrase := _stop_in(text):
                 # The canceller lets some echo through, mostly as a reply starts, so Jarvis
                 # saying "stop by the office" could otherwise stop itself. Only the stop
                 # phrase's own words count here: the "sir" of an echoed "yes sir" is no reason.
                 if set(_word_list(saying())) & set(phrase.split()):
                     log.info("heard %r, but I just said it myself: ignored", text)
-                    rec = _stop_recognizer()
+                    rec, rec_start = _stop_recognizer(), sum(map(len, heard))
                     continue
-                if _is_echo(heard, reply()):
-                    rec = _stop_recognizer()
+                if _is_echo(_stop_clip(heard, rec_start, result, phrase), reply()):
+                    rec, rec_start = _stop_recognizer(), sum(map(len, heard))
                     continue
                 log.info("heard %r: stopping", text)
                 stop.heard = text
