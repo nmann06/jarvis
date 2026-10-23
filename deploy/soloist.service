@@ -1,0 +1,17 @@
+[Unit]
+Description=Spotify Soloist: Spotify device "Jarvis" on Jarvis's speaker
+# Plays through the user's PipeWire session (default sink = echo-cancel sink), like Jarvis.
+After=pipewire.service pipewire-pulse.service wireplumber.service network-online.target
+Wants=pipewire.service pipewire-pulse.service wireplumber.service
+
+[Service]
+# SOLOIST_API_KEY=... (mode 600); soloist only takes the key as an argument.
+EnvironmentFile=%h/.config/soloist/soloist.env
+ExecStart=%h/.local/bin/soloist --device-name Jarvis --api-key ${SOLOIST_API_KEY} --initial-volume 60 --cache-size 1000
+Restart=always
+RestartSec=10
+# Exit 10 = this build has expired (90 days after its build date): download a new one, don't loop.
+RestartPreventExitStatus=10
+
+[Install]
+WantedBy=default.target
