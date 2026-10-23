@@ -126,12 +126,16 @@ def spoken_number(handle):
     return ", ".join(" ".join(_DIGITS[int(d)] for d in g) for g in groups)
 
 
+# Contacts whose names speech-to-text spells the way they sound, not as they're written.
+_SOUNDS_LIKE = {"hide": "hyde", "tampon": "thampon"}
+
+
 def _resolve(to):
     """(handle, name) for a name, number or email."""
     if "@" in to or sum(c.isdigit() for c in to) >= 7:
         names = _names()
         return to.strip(), _who(to.strip(), names)
-    want = to.strip().lower()
+    want = " ".join(_SOUNDS_LIKE.get(w, w) for w in to.strip().lower().split())
     names = _names()
     matches = sorted({(name, key) for key, name in names.items() if want in name.lower()})
     if not matches:
