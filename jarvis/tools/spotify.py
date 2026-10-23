@@ -151,10 +151,16 @@ def spotify_play(query, kind, device):
     return f"Playing the {kind} {what}."
 
 
-@tool("Control Spotify playback: pause, resume, skip to the next or previous track, set volume, "
-      "or turn shuffle on or off.",
+VOLUME_STEP = 15  # "Spotify volume up/down"
+
+
+@tool("Control Spotify playback: pause, resume, skip to the next or previous track, change "
+      "Spotify's own volume, or turn shuffle on or off. Spotify's volume changes only the music, "
+      "not Jarvis's voice: use it whenever the owner names the music or Spotify ('Spotify volume "
+      "up', 'music up', 'turn the music down', 'music to 30'). "
+      "Plain 'volume up' or 'louder' is speaker_volume (Jarvis and the music together).",
       action={"type": "string", "enum": ["pause", "resume", "next", "previous", "volume",
-                                         "shuffle on", "shuffle off"]},
+                                         "volume up", "volume down", "shuffle on", "shuffle off"]},
       volume_percent={"type": "integer", "minimum": 0, "maximum": 100,
                       "description": "For action volume; otherwise anything"})
 def spotify_control(action, volume_percent):
@@ -166,6 +172,16 @@ def spotify_control(action, volume_percent):
         _call("POST", f"/me/player/{action}")
     elif action == "volume":
         _call("PUT", "/me/player/volume", params={"volume_percent": volume_percent})
+        return f"Spotify volume {volume_percent}%."
+    elif action in ("volume up", "volume down"):
+        now = ((_call("GET", "/me/player") or {}).get("device") or {}).get("volume_percent")
+        if now is None:
+            raise RuntimeError("Nothing is playing on Spotify, so there's no volume to change")
+        new = max(0, min(100, now + (VOLUME_STEP if action == "volume up" else -VOLUME_STEP)))
+        if new == now:
+            return f"Spotify is already at {now}%."
+        _call("PUT", "/me/player/volume", params={"volume_percent": new})
+        return f"Spotify volume {now}% -> {new}%."
     else:
         _call("PUT", "/me/player/shuffle", params={"state": "true" if action == "shuffle on" else "false"})
     return "Done."
