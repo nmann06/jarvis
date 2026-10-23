@@ -17,6 +17,7 @@ import numpy as np
 import sounddevice as sd
 
 from jarvis import audio, config, latency, learn, llm, notify, project, stt, tools, tts
+from jarvis.tools import imessage
 from jarvis.tools.clock import TZ
 from jarvis.wakeword import WakeWord
 
@@ -384,6 +385,26 @@ def _asked_please(kind, request=None):
     log.info("said %r after a %s; waiting for please", SAY_PLEASE, kind)
 
 
+# "Text Hyde" with no message: Jarvis asks what it should say, and the answer is the message.
+# Left to Claude, a third of the time it took the answer ("This is funny") for a comment, or
+# said it had drafted it without doing so. Asked as one request, it drafts it every time.
+_TEXT_WHO = re.compile(r"^(?:(?:hey |ok |okay )?jarvis[,.]? )?(?:can you |could you |please )?"
+                       r"(?:text|message|send a text to|send a message to)\s+([\w' ]{1,30}?)[.!?]?$",
+                       re.I)
+_NEVER_MIND = re.compile(r"\b(?:never ?mind|cancel|forget it|don't|do not|stop)\b", re.I)
+_texting = None  # the contact asked "What should it say?" for
+
+
+def _contact_only(text):
+    """The contact's name if text is just "Text <contact>", else None."""
+    if not (m := _TEXT_WHO.match(text.strip())) or len(m[1].split()) > 3:
+        return None
+    try:
+        return imessage.contact_name(m[1])
+    except ValueError:
+        return None  # not a contact (or several): Claude sorts it out
+
+
 _unfinished = None  # (texts, index of the sentence cut off) after "stop", for "continue"
 
 
@@ -446,7 +467,7 @@ def handle(mic, brain, utterance, follow_up=False):
 
 
 def _answer(mic, brain, utterance, follow_up, turn):
-    global _last_reply, _unfinished, _awaiting_please
+    global _last_reply, _unfinished, _awaiting_please, _texting
     text, started, finished = utterance.transcribe()  # usually done during the pause already
     turn.transcribed(text, started, finished)
     if not text:
@@ -454,11 +475,25 @@ def _answer(mic, brain, utterance, follow_up, turn):
         turn.outcome = "nothing heard"
         return False
     log.info("you: %s", text)
+    text = imessage.fix_names(text)
     if is_wake_only(text):
         log.info("just the wake word: listening again")
         turn.outcome = "woken again"
         return WOKEN
     note = None  # for Claude, this turn only
+    if _texting:
+        to, _texting = _texting, None
+        if not _NEVER_MIND.search(text):
+            text, follow_up = f'Text {to}: "{text}"', False
+    elif (to := _contact_only(text)) is not None:
+        log.info("text to %s: asking what it should say (local)", to)
+        reply = "What should it say, sir?"
+        with _speaker:
+            _speak(mic, [reply], timing=turn)
+        mic.clear()
+        _texting, _last_reply = to, reply
+        turn.reply, turn.outcome = reply, "asked for the message"
+        return True
     if _awaiting_please:
         waiting, _awaiting_please = _awaiting_please, None
         if _said_please(text):

@@ -12,6 +12,7 @@ had a chance to hear it and say yes. Setup: IMESSAGE_SSH in .env (README: iMessa
 
 import difflib
 import json
+import re
 import shlex
 import subprocess
 import threading
@@ -97,8 +98,15 @@ def messages_recent(contact, limit):
 
 
 @tool("Draft an iMessage or text to someone. Nothing is sent: read the message and recipient back "
-      "to the owner and ask them to confirm, then use messages_send once they say yes.",
-      to={"type": "string", "description": "A contact's name, a phone number or an email"},
+      "to the owner and ask them to confirm, then use messages_send once they say yes. In \"text "
+      "X\" or \"tell X ...\", X is a contact even when it sounds like an ordinary word (speech-to-"
+      "text spells names as they sound: \"Hide\" is the contact Hyde, \"Tampon\" is Thampon), so "
+      "pass it as heard. If no message was given, ask what it should say; don't ask who. Once "
+      "you've asked, the owner's next words are the message, whatever they are (\"This is "
+      "funny\" is the text, not a comment on you): call this tool with them as said. Never "
+      "say a text is drafted, or ask \"Shall I send it?\", without having called this tool.",
+      to={"type": "string", "description": "A contact's name (as heard; names that sound alike "
+                                           "match), a phone number or an email"},
       text={"type": "string", "description": "The message, as it will be sent"})
 def messages_draft(to, text):
     global _draft
@@ -128,6 +136,17 @@ def spoken_number(handle):
 
 # Contacts whose names speech-to-text spells the way they sound, not as they're written.
 _SOUNDS_LIKE = {"hide": "hyde", "tampon": "thampon"}
+_HEARD_NAME = re.compile(r"\b(text|tell|message|reply to)\s+(" + "|".join(_SOUNDS_LIKE) + r")\b", re.I)
+
+
+def fix_names(text):
+    """'Text hide' as heard -> 'Text Hyde': otherwise Claude takes "hide" for a word and asks who."""
+    return _HEARD_NAME.sub(lambda m: f"{m[1]} {_SOUNDS_LIKE[m[2].lower()].title()}", text)
+
+
+def contact_name(to):
+    """The contact a name (as heard) means; ValueError if none or several."""
+    return _resolve(to)[1]
 
 
 def _resolve(to):
