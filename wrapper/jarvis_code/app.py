@@ -279,6 +279,7 @@ class JarvisApp(App):
         self.context_pct = None
         self.limit_note = ""
         self.session_ends = None          # when the 5-hour usage window resets (epoch seconds)
+        self.usage = {}                   # % of the plan used: {"five_hour": 13, "seven_day": 28}
         self.file_index = files.FileIndex(self.cwd)
         self.permission_queue = None
         self.branch = ""
@@ -383,22 +384,29 @@ class JarvisApp(App):
         account = self.info.get("account") or {}
         self.banner.set_info(plan=account.get("subscriptionType"), version=self.info.get("claude_code_version"))
         await self.refresh_settings()
-        self.run_worker(self.fetch_session_end(engine), group="usage")
+        self.run_worker(self.fetch_usage(engine), group="usage")
         return True
 
-    async def fetch_session_end(self, engine):
-        """The 5-hour window's reset time for the footer, before the first turn reports it."""
+    async def fetch_usage(self, engine):
+        """How much of the plan is used (5-hour and weekly) and when the 5-hour window resets,
+        for the footer: when Claude Code starts and after each turn."""
         try:
             limits = (await engine.request("get_usage", timeout=90)).get("rate_limits") or {}
         except EngineError:
             return
-        when = (limits.get("five_hour") or {}).get("resets_at")
-        when = when or next((l.get("resets_at") for l in limits.get("limits") or []
-                             if l.get("kind") == "session"), None)
+        listed = {l.get("kind"): l for l in limits.get("limits") or [] if isinstance(l, dict)}
+        for name, kind in (("five_hour", "session"), ("seven_day", "weekly_all")):
+            percent = (limits.get(name) or {}).get("utilization")
+            if percent is None:
+                percent = (listed.get(kind) or {}).get("percent")
+            if percent is not None:
+                self.usage[name] = round(percent)
+        when = (limits.get("five_hour") or {}).get("resets_at") or (listed.get("session") or {}).get("resets_at")
         try:
             self.set_session_end(datetime.fromisoformat(when.replace("Z", "+00:00")).timestamp())
         except (AttributeError, ValueError):
             pass
+        self.update_footer()
 
     def set_session_end(self, when):
         if when and when != self.session_ends:
@@ -465,13 +473,14 @@ class JarvisApp(App):
             self.footer.right = "Claude Code isn't running"
         else:
             running = len(self.background)
-            ends = ""
+            session = f"5-hour {self.usage['five_hour']}%" if "five_hour" in self.usage else ""
             if self.session_ends and self.session_ends > time.time() and "resets" not in self.limit_note:
                 clock = strftime(datetime.fromtimestamp(self.session_ends), "%-I:%M%p")
-                ends = "5-hour session ends " + clock.lower().replace(":00", "")
-            parts = (self.limit_note, ends,
+                session = (session or "5-hour session") + " ends " + clock.lower().replace(":00", "")
+            parts = (self.limit_note, session,
+                     f"weekly {self.usage['seven_day']}%" if "seven_day" in self.usage else "",
                      f"{running} background task{'s' if running != 1 else ''}" if running else "",
-                     self.model_label(),
+                     self.model_label(), self.effort and f"{self.effort} effort",
                      f"{self.context_pct}% context" if self.context_pct is not None else "")
             self.footer.right = " · ".join(p for p in parts if p)
         self.footer.redraw()
@@ -779,6 +788,8 @@ class JarvisApp(App):
             self.queued_panel.show([])
             self.end_turn()
         self.run_worker(self.refresh_context(), group="context")
+        if self.engine:
+            self.run_worker(self.fetch_usage(self.engine), group="usage", exclusive=True)
         if self.commands_pending:
             self.commands_pending = False
             self.run_worker(self.refresh_settings(), group="settings")
@@ -786,24 +797,18 @@ class JarvisApp(App):
     def on_rate_limit(self, msg):
         info = msg.get("rate_limit_info") or {}
         windows = info.get("unifiedWindows") or {}
-        worst_name, worst = None, 0.0
-        for name, window in windows.items():
-            if (window.get("utilization") or 0) > worst:
-                worst_name, worst = name, window["utilization"]
         resets = info.get("resetsAt")
         five_hour = (windows.get("five_hour") or {}).get("resetsAt")
         if not five_hour and info.get("rateLimitType") == "five_hour":
             five_hour = resets
         if five_hour:
             self.set_session_end(five_hour)
+        for name in ("five_hour", "seven_day"):
+            utilization = (windows.get(name) or {}).get("utilization")
+            if utilization is not None:
+                self.usage[name] = round(utilization * 100)  # a fraction here, a percent in get_usage
         when = strftime(datetime.fromtimestamp(resets), "%-I:%M %p").lower() if resets else ""
-        if info.get("status") == "rejected":
-            self.limit_note = f"usage limit reached · resets {when}".strip()
-        elif worst >= 0.9:
-            label = {"five_hour": "5-hour", "seven_day": "weekly"}.get(worst_name, worst_name)
-            self.limit_note = f"{round(worst * 100)}% of {label} limit"
-        else:
-            self.limit_note = ""
+        self.limit_note = f"usage limit reached · resets {when}".strip() if info.get("status") == "rejected" else ""
         self.update_footer()
 
     async def on_reset(self, msg):
