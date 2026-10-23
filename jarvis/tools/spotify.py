@@ -79,7 +79,10 @@ def _call(method, path, **kwargs):
         raise RuntimeError({"PREMIUM_REQUIRED": "Controlling playback needs Spotify Premium",
                             "NO_ACTIVE_DEVICE": "No device is playing Spotify: open Spotify "
                             "somewhere (phone, laptop, speaker) first"}.get(reason, f"Spotify: {reason}"))
-    return r.json()
+    try:
+        return r.json()
+    except ValueError:  # pause/play sometimes answer 200 with a non-JSON body
+        return None
 
 
 def _describe(item):
