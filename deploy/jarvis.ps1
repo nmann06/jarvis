@@ -17,7 +17,7 @@ function jarvis {
     if ($args.Count -and $args[0] -eq '--hyde') {
         # -t gives the window a terminal; each option is single-quoted for hyde's shell.
         $options = ($args | Select-Object -Skip 1 | ForEach-Object { "'" + ($_ -replace "'", "'\''") + "'" }) -join ' '
-        ssh -t -o ConnectTimeout=10 $JarvisHyde "~/jarvis/wrapper/jarvis-code $options"
+        ssh -t -o ConnectTimeout=10 $JarvisHyde "~/jarvis-wrapper/jarvis-code $options"
         return
     }
     if (-not $args -or $window -contains $args[0]) {
@@ -42,7 +42,7 @@ function jarvis {
 }
 
 function Update-JarvisWindow {
-    # The window's code (~/jarvis/wrapper on hyde) is copied to $JarvisWindow and runs here, on
+    # The window's code (~/jarvis-wrapper on hyde) is copied to $JarvisWindow and runs here, on
     # this laptop's Python and Claude Code. Run it again after the window changes on hyde.
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
         Write-Host 'Claude Code needs installing here first:  irm https://claude.ai/install.ps1 | iex'
@@ -69,8 +69,8 @@ function Update-JarvisWindow {
     Remove-Item -Recurse -Force $incoming -ErrorAction SilentlyContinue
     New-Item -ItemType Directory $incoming | Out-Null
     Write-Host 'Copying the window from hyde...'
-    scp -q -r -o ConnectTimeout=10 "${JarvisHyde}:jarvis/wrapper/jarvis_code" "${JarvisHyde}:jarvis/wrapper/launch.py" `
-        "${JarvisHyde}:jarvis/wrapper/requirements.txt" $incoming
+    scp -q -r -o ConnectTimeout=10 "${JarvisHyde}:jarvis-wrapper/jarvis_code" "${JarvisHyde}:jarvis-wrapper/launch.py" `
+        "${JarvisHyde}:jarvis-wrapper/requirements.txt" $incoming
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Couldn't copy it from hyde. Is Tailscale on, and does  ssh $JarvisHyde  work?"
         Remove-Item -Recurse -Force $incoming
