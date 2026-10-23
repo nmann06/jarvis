@@ -308,7 +308,8 @@ shared with it (`/resume` sees both). Claude Code also takes on Jarvis's persona
 
 The window draws the rest the way Claude Code does: streamed replies, thinking (one line,
 ctrl+o shows it), tool calls with diffs and folded output, permission dialogs, AskUserQuestion,
-plan approval, the task list, subagents, queued prompts and the context left. The keys are
+plan approval, the task list, subagents, queued prompts and the context left; the footer also
+always shows plan usage (5-hour, with when it resets, and weekly), the model and effort. The keys are
 Claude Code's: shift+tab switches mode (default, accept edits, plan, auto), esc interrupts,
 `\`+enter or ctrl+j adds a line, ctrl+x s sends now (stopping the turn in progress instead of
 queueing), up and down go through past prompts (shared with Claude Code),
