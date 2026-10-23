@@ -11,7 +11,9 @@ and renews itself.
 import base64
 import hashlib
 import json
+import logging
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -30,6 +32,7 @@ SCOPES = "user-read-playback-state user-modify-playback-state user-read-currentl
 TOKEN_FILE = config.ROOT / "data" / "spotify-token.json"
 
 _lock = threading.Lock()
+log = logging.getLogger("jarvis.spotify")
 
 
 def _save(token):
@@ -103,8 +106,9 @@ def spotify_now_playing():
 
 
 def _device(name):
-    """The id of the device whose name contains name, or None for the active device. With
-    nothing active, the first available device, so "play X" still works."""
+    """The id of the device whose name contains name, or None for the active device. With no
+    name, Jarvis's own speaker (spotifyd); if that isn't running, the active device, or with
+    nothing active the first available one, so "play X" still works."""
     devices = (_call("GET", "/me/player/devices") or {}).get("devices", [])
     if name:
         for d in devices:
@@ -112,6 +116,9 @@ def _device(name):
                 return d["id"]
         raise RuntimeError(f"No Spotify device called {name!r}. Devices: "
                            + (", ".join(d["name"] for d in devices) or "none open"))
+    for d in devices:
+        if d["name"].lower() == config.SPOTIFY_SPEAKER.lower():
+            return None if d["is_active"] else d["id"]
     if any(d["is_active"] for d in devices):
         return None
     if devices:
@@ -125,7 +132,8 @@ def _device(name):
              "'my workout playlist'; empty to resume"},
       kind={"type": "string", "enum": ["track", "album", "artist", "playlist"],
             "description": "What the query names"},
-      device={"type": "string", "description": "Device name to play on, or empty for the current one"})
+      device={"type": "string", "description": "Device name to play on, only if the owner names "
+              "one (e.g. 'my laptop'); empty plays out of Jarvis's own speaker"})
 def spotify_play(query, kind, device):
     device_id = _device(device)
     params = {"device_id": device_id} if device_id else {}
@@ -163,7 +171,8 @@ def spotify_control(action, volume_percent):
     return "Done."
 
 
-@tool("List the devices Spotify can play on (phone, laptop, speakers), or move playback to one.",
+@tool("List the devices Spotify can play on (phone, laptop, speakers), or move playback to one. "
+      f"The device called {config.SPOTIFY_SPEAKER!r} is Jarvis's own speaker ('here').",
       move_to={"type": "string", "description": "Device name to move playback to, or empty to just list"})
 def spotify_devices(move_to):
     devices = (_call("GET", "/me/player/devices") or {}).get("devices", [])
@@ -173,6 +182,31 @@ def spotify_devices(move_to):
         return f"Moved playback to {next(d['name'] for d in devices if d['id'] == device_id)}."
     return [{"name": d["name"], "type": d["type"], "active": d["is_active"],
              "volume": d.get("volume_percent")} for d in devices] or "No devices have Spotify open."
+
+
+DUCK_VOLUME = "20%"
+_ducks = 0
+_duck_lock = threading.Lock()
+
+
+def duck(on):
+    """Turn the music on Jarvis's speaker down while Jarvis listens and talks (on=True), and back
+    up after (on=False). Calls nest: the music comes back up when the last one ends. Done on
+    spotifyd's PipeWire stream, so it is instant and leaves Spotify's own volume alone."""
+    global _ducks
+    with _duck_lock:
+        _ducks = _ducks + 1 if on else max(_ducks - 1, 0)
+        if _ducks > (1 if on else 0):
+            return
+        try:
+            streams = json.loads(subprocess.run(["pactl", "-f", "json", "list", "sink-inputs"],
+                                                capture_output=True, text=True, timeout=2).stdout)
+            for s in streams:
+                if s["properties"].get("application.process.binary") == "spotifyd":
+                    subprocess.run(["pactl", "set-sink-input-volume", str(s["index"]),
+                                    DUCK_VOLUME if on else "100%"], timeout=2)
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            log.warning("couldn't %s the music: %s", "lower" if on else "raise", e)
 
 
 def login():
