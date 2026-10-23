@@ -289,6 +289,43 @@ Without claude.ai, a Claude Code install can add it by itself:
 To shut it off: `tailscale funnel --bg 8766 off`; to change the key, change `MCP_TOKEN`,
 restart Jarvis, and update the connector's URL.
 
+### The Jarvis window (Claude Code, in blue)
+
+`jarvis` with nothing after it opens the Jarvis window in the current folder: Claude Code with a
+screen of its own, JARVIS in blue where Claude Code has its orange mascot, and blue wherever
+Claude Code is orange (the spinner, thinking, modes, dialogs). `jarvis -c` continues the last
+conversation in that folder, `jarvis -r` picks one (`jarvis -r <id>` resumes that one). From the
+Windows laptop, `jarvis` opens it on hyde over ssh (docs/terminal.md).
+
+The answers are Claude Code's own: the window runs the real `claude` headless (`claude -p`,
+stream-json both ways, on the Pro login), so every tool, MCP server (the Jarvis one included),
+skill, hook, CLAUDE.md, auto mode and saved session is Claude Code's, and conversations are
+shared with it (`/resume` sees both). Claude Code also takes on Jarvis's persona in this window
+(calm, dry, the odd "sir"); `jarvis --plain` leaves it out.
+
+The window draws the rest the way Claude Code does: streamed replies, thinking (one line,
+ctrl+o shows it), tool calls with diffs and folded output, permission dialogs, AskUserQuestion,
+plan approval, the task list, subagents, queued prompts and the context left. The keys are
+Claude Code's: shift+tab switches mode (default, accept edits, plan, auto), esc interrupts,
+`\`+enter or ctrl+j adds a line, up and down go through past prompts (shared with Claude Code),
+`/` lists commands, `@` files, `!` runs a shell command, ctrl+c twice quits. Commands Claude Code
+runs headless (`/compact`, `/context`, `/model`, `/effort`, `/clear`, skills) go straight to it.
+Claude Code's interactive menus are rebuilt here: `/usage`, `/status`, `/config` and `/stats`
+open its Settings panel on that tab (←/→ between them: plan limits with reset times and what's
+using them, `f` to put the suggested fix in the prompt; every setting, searchable, changed with
+Enter; the activity heatmap and tokens per model, `r` for the date range), and `/mcp` lists the
+MCP servers with their tools, to reconnect, disable or sign out of one. They ask Claude Code
+for their data and change settings in a separate `claude -p`, so nothing lands in the
+conversation. `/resume`, `/copy`, `/export` and `/help` are the window's own too; and `/claude`
+opens the same conversation in plain Claude Code (for its own screens like `/plugin` or
+`/login`), coming back when you exit it. Permission dialogs also run the `Notification` hooks,
+which headless Claude Code skips, so the alerts above still say when it's waiting on you.
+
+It lives in `wrapper/`: `jarvis-code` starts `jarvis_code/` from its own venv (Textual), set up
+with `python3 -m venv wrapper/.venv && wrapper/.venv/bin/pip install -r wrapper/requirements.txt`.
+`wrapper/.venv/bin/python -m pytest wrapper` runs its tests against a fake Claude Code
+(`tests/fake_claude.py`), and `jarvis --log FILE` records everything said with the real one.
+
 ## Checks
 
 ```

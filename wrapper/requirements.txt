@@ -1,0 +1,6 @@
+# The Jarvis window (jarvis_code/). Its own venv: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+textual==8.2.8
+rich==15.0.0
+# tests: .venv/bin/python -m pytest
+pytest==9.1.1
+pytest-asyncio==1.4.0
