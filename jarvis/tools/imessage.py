@@ -46,9 +46,12 @@ def _names():
            "FROM ZABCDPHONENUMBER p JOIN ZABCDRECORD r ON p.ZOWNER = r.Z_PK UNION ALL "
            "SELECT COALESCE(r.ZFIRSTNAME,'') || ' ' || COALESCE(r.ZLASTNAME,''), NULL, e.ZADDRESS "
            "FROM ZABCDEMAILADDRESS e JOIN ZABCDRECORD r ON e.ZOWNER = r.Z_PK")
-    out = _ssh("for db in ~/Library/Application\\ Support/AddressBook/Sources/*/AddressBook-v22.abcddb; do "
-               f"[ -e \"$db\" ] && sqlite3 -separator \"$(printf '\\t')\" \"$db\" {shlex.quote(sql)}; "
-               "done 2>/dev/null || true")
+    # find, not a glob: the Mac's shell is zsh, where a glob matching nothing (no contacts synced
+    # yet) aborts the whole command
+    out = _ssh("find ~/Library/Application\\ Support/AddressBook -name AddressBook-v22.abcddb 2>/dev/null | "
+               "while IFS= read -r db; do "
+               f"sqlite3 -separator \"$(printf '\\t')\" \"$db\" {shlex.quote(sql)} 2>/dev/null; "
+               "done; true")
     names = {}
     for line in out.splitlines():
         name, number, email = (line.split("\t") + ["", "", ""])[:3]
