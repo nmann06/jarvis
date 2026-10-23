@@ -28,7 +28,7 @@ from textual.widgets import Markdown, Static
 
 from . import __version__, config_items, files, persona, sessions, stats, theme, tools
 from .engine import Engine, EngineError, claude_command, claude_path, clean_environment
-from .panels import McpPanel, Panel, SettingsPanel
+from .panels import McpPanel, Panel, SettingsPanel, strftime
 from .widgets import (AssistantEntry, Banner, Dialog, DoneEntry, Entry, Footer, NoticeEntry,
                       Picker, PromptBar, QueuedPanel, Spinner, SuggestionMenu, TaskPanel,
                       ThinkingEntry, ToolEntry, Transcript, UserEntry, notice, shortcuts)
@@ -351,7 +351,7 @@ class JarvisApp(App):
                 await self.note(f"No conversation {resume} found; starting a new one.", theme.ERROR)
                 resume = None
         if await self.start_engine(resume=resume) and self.options.prompt:
-            self.submissions.put_nowait(self.options.prompt)
+            self.submissions.put_nowait((self.options.prompt, False))
 
     # The engine -----------------------------------------------------------------------------
 
@@ -467,7 +467,7 @@ class JarvisApp(App):
             running = len(self.background)
             ends = ""
             if self.session_ends and self.session_ends > time.time() and "resets" not in self.limit_note:
-                clock = time.strftime("%-I:%M%p", time.localtime(self.session_ends))
+                clock = strftime(datetime.fromtimestamp(self.session_ends), "%-I:%M%p")
                 ends = "5-hour session ends " + clock.lower().replace(":00", "")
             parts = (self.limit_note, ends,
                      f"{running} background task{'s' if running != 1 else ''}" if running else "",
@@ -796,7 +796,7 @@ class JarvisApp(App):
             five_hour = resets
         if five_hour:
             self.set_session_end(five_hour)
-        when = time.strftime("%-I:%M %p", time.localtime(resets)).lower() if resets else ""
+        when = strftime(datetime.fromtimestamp(resets), "%-I:%M %p").lower() if resets else ""
         if info.get("status") == "rejected":
             self.limit_note = f"usage limit reached · resets {when}".strip()
         elif worst >= 0.9:
@@ -852,6 +852,16 @@ class JarvisApp(App):
             await self.engine.interrupt()
         except EngineError:
             self.end_turn()
+
+    async def stop_turn(self, timeout=15):
+        """Interrupt the turn in progress and wait for it to end, so the next prompt (ctrl+x s)
+        starts a turn of its own instead of waiting in the queue."""
+        if not self.busy:
+            return
+        await self.interrupt()
+        deadline = time.monotonic() + timeout
+        while self.busy and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
 
     def tick(self):
         # Follow new output once there's more than a screenful (anchoring sooner would sit
@@ -1152,14 +1162,16 @@ class JarvisApp(App):
             self.history.remove(text)
         self.history.insert(0, text)
         sessions.add_history(text, self.cwd, self.session_id)
-        self.submissions.put_nowait(text)
+        self.submissions.put_nowait((text, event.now))
 
     async def submission_loop(self):
         """Prompts run here, one at a time and in order, never in a key handler: a command
         that opens a dialog (/resume, /model) waits for keys a key handler would hold up."""
         while True:
-            text = await self.submissions.get()
+            text, now = await self.submissions.get()
             try:
+                if now:
+                    await self.stop_turn()
                 await self.submit(text)
             except Exception as e:
                 self.log.error(f"submitting {text[:40]!r}: {e!r}")
@@ -1743,7 +1755,8 @@ class JarvisApp(App):
             self.transcript.scroll_page_down()
 
     def action_external_editor(self):
-        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or shutil.which("nano") or "vi"
+        editor = (os.environ.get("VISUAL") or os.environ.get("EDITOR") or shutil.which("nano")
+                  or ("notepad" if os.name == "nt" else "vi"))
         with tempfile.NamedTemporaryFile("w+", suffix=".md", delete=False) as f:
             f.write(self.prompt.text)
             path = f.name

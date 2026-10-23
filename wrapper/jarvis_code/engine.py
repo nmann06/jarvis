@@ -30,7 +30,8 @@ class EngineError(Exception):
 
 
 def claude_path():
-    return shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    local = os.path.expanduser("~/.local/bin")  # where the native installer puts it (claude.exe on Windows)
+    return shutil.which("claude") or shutil.which("claude", path=local) or os.path.join(local, "claude")
 
 
 def claude_command(command=None):

@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-# The Jarvis window: Claude Code with a screen of its own (jarvis_code/, run from its venv).
-# Python runs isolated (-I) so files in the folder you open it from can't shadow its modules.
+# The Jarvis window: Claude Code with a screen of its own (jarvis_code/, run from its venv by launch.py).
 here="$(dirname "$(readlink -f "$0")")"
 export COLORTERM="${COLORTERM:-truecolor}"  # ssh doesn't pass it on; Windows Terminal does 24-bit
-exec "$here/.venv/bin/python" -I -c '
-import sys
-sys.path.insert(0, sys.argv.pop(1))
-from jarvis_code.__main__ import main
-sys.exit(main())
-' "$here" "$@"
+exec "$here/.venv/bin/python" -I "$here/launch.py" "$@"

@@ -52,15 +52,20 @@ def zone_name():
     return time.tzname[0]
 
 
+def strftime(when, fmt):
+    """when.strftime(fmt), where %-I and %-d (no leading zero) also work on Windows (%#I)."""
+    return when.strftime(fmt.replace("%-", "%#") if os.name == "nt" else fmt)
+
+
 def resets(iso):
     """Resets 4:10pm, or Resets Oct 29, 3am, in local time."""
     try:
         when = dt.datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
     except (AttributeError, ValueError):
         return ""
-    clock = when.strftime("%-I:%M%p").lower().replace(":00", "")
+    clock = strftime(when, "%-I:%M%p").lower().replace(":00", "")
     if when.date() != dt.date.today():
-        clock = when.strftime("%b %-d, ") + clock
+        clock = strftime(when, "%b %-d, ") + clock
     return f"Resets {clock} ({zone_name()})"
 
 
@@ -629,7 +634,7 @@ class SettingsPanel(Panel):
              "Total tokens", stats_mod.human_tokens(s["tokens"])),
             ("Sessions", str(s["sessions"]), "Longest session", stats_mod.human_duration(s["longest_ms"])),
             ("Active days", f"{s['active_days']}/{s['total_days']}", "Longest streak", plural_days(s["longest_streak"])),
-            ("Most active day", s["busiest"].strftime("%b %-d") if s["busiest"] else "—",
+            ("Most active day", strftime(s["busiest"], "%b %-d") if s["busiest"] else "—",
              "Current streak", plural_days(s["current_streak"])),
         ]
         table = Table.grid(padding=(0, 4))
@@ -751,8 +756,8 @@ def chart(series, dates, width, height=8):
         rows.append(line)
     first, last = dates[0], dates[-1]
     axis = Text(" " * 9, style=theme.DIM)
-    start = dt.date.fromisoformat(first).strftime("%b %-d")
-    end = dt.date.fromisoformat(last).strftime("%b %-d")
+    start = strftime(dt.date.fromisoformat(first), "%b %-d")
+    end = strftime(dt.date.fromisoformat(last), "%b %-d")
     axis.append(start + " " * max(1, columns - len(start) - len(end)) + (end if last != first else ""), style=theme.DIM)
     rows.append(axis)
     return rows

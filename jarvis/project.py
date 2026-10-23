@@ -219,7 +219,7 @@ class Project:
         if code and not stopped:
             self.post(f"⚠️ Claude Code exited with code {code}")
         if not said and not stopped:
-            self._say(f"The {self.name} project has finished; the details are in Discord.")
+            self._say(f"I'm finished with the {self.name} project; the details are in Discord.")
 
     def _nudge(self, done):
         """Say "still working" if Claude Code has been quiet for a while."""
