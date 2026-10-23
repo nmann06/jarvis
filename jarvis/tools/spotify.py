@@ -240,7 +240,9 @@ def spotify_devices(move_to):
 
 
 DUCK_VOLUME = "20%"
-SPEAKER_BINARIES = ("soloist", "spotifyd")  # whose PipeWire streams get ducked
+# The speaker's PipeWire stream: Soloist's is node "spotify" (it sets no process binary);
+# spotifyd's had binary "spotifyd".
+_SPEAKER_STREAM = {"node.name": "spotify", "application.process.binary": "spotifyd"}
 _ducks = 0
 _duck_lock = threading.Lock()
 
@@ -258,7 +260,7 @@ def duck(on):
             streams = json.loads(subprocess.run(["pactl", "-f", "json", "list", "sink-inputs"],
                                                 capture_output=True, text=True, timeout=2).stdout)
             for s in streams:
-                if s["properties"].get("application.process.binary") in SPEAKER_BINARIES:
+                if any(s["properties"].get(k) == v for k, v in _SPEAKER_STREAM.items()):
                     subprocess.run(["pactl", "set-sink-input-volume", str(s["index"]),
                                     DUCK_VOLUME if on else "100%"], timeout=2)
         except (OSError, ValueError, subprocess.SubprocessError) as e:
