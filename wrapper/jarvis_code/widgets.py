@@ -420,7 +420,8 @@ class HRule(Static):
 
 
 class PromptInput(TextArea):
-    """The prompt. Enter sends; \\+Enter, ctrl+j or alt+enter start a new line; the arrows walk
+    """The prompt. Enter sends (queued while Jarvis is busy), ctrl+x s sends now (interrupting);
+    \\+Enter, ctrl+j or alt+enter start a new line; the arrows walk
     the suggestion menu when it's open and the prompt history at the first or last line."""
 
     DEFAULT_CSS = """
@@ -431,17 +432,32 @@ class PromptInput(TextArea):
     """
 
     class Submitted(Message):
-        def __init__(self, text):
+        def __init__(self, text, now=False):
             super().__init__()
             self.text = text
+            self.now = now  # ctrl+x s: stop the turn in progress and send this straight away
 
     def __init__(self, **kw):
         super().__init__(soft_wrap=True, compact=True, highlight_cursor_line=False,
                          placeholder='Ask Jarvis anything, or try "/help"', **kw)
+        self.chord_until = 0.0  # ctrl+x was pressed; s before this sends now
 
     async def _on_key(self, event):
         app = self.app
         key = event.key
+        if key == "ctrl+x":  # instead of TextArea's cut: the start of ctrl+x s
+            event.stop()
+            event.prevent_default()
+            self.chord_until = time.monotonic() + 2
+            app.footer.flash("ctrl+x · s to send now", 2)
+            return
+        if self.chord_until:
+            pending, self.chord_until = time.monotonic() < self.chord_until, 0.0
+            if pending and key in ("s", "ctrl+s"):
+                event.stop()
+                event.prevent_default()
+                self.post_message(self.Submitted(self.text, now=True))
+                return
         if key == "enter":
             event.stop()
             event.prevent_default()
@@ -619,6 +635,7 @@ SHORTCUTS = [
     ("esc to interrupt", "ctrl+o to expand details"),
     ("esc esc to clear the prompt", "ctrl+t to show tasks"),
     ("ctrl+c twice to exit", "ctrl+g to edit in $EDITOR"),
+    ("ctrl+x s to send now", ""),
 ]
 
 

@@ -3,7 +3,8 @@
     jarvis                    a new conversation
     jarvis -c                 continue the last conversation here
     jarvis -r [id]            resume one (without an id, pick from a list)
-    jarvis --model sonnet     start on another model (also --effort, --mode)
+    jarvis --model sonnet     start on another model (also --effort)
+    jarvis --mode default     start in another permission mode (auto unless told otherwise)
     jarvis -p "fix the tests" start with a prompt
 """
 
@@ -24,7 +25,8 @@ def parse(argv):
     parser.add_argument("--model", help="model to start with (opus, sonnet, haiku, fable, or a full name)")
     parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max", "auto"])
     parser.add_argument("--mode", "--permission-mode", dest="mode", choices=MODES,
-                        help="permission mode to start in (shift+tab switches later)")
+                        default=os.environ.get("JARVIS_MODE", "auto"),
+                        help="permission mode to start in (default: auto; shift+tab switches later)")
     parser.add_argument("--plain", action="store_true", help="answer as plain Claude Code, without the Jarvis persona")
     parser.add_argument("--thinking", choices=["summarized", "omitted"],
                         default=os.environ.get("JARVIS_THINKING", "summarized"),

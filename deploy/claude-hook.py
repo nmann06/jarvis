@@ -47,20 +47,20 @@ def mark(session):
 def message(event):
     name, where = event.get("hook_event_name"), project(event.get("cwd", ""))
     if name == "Stop":
-        return f"Sir, Claude has finished in {where}."
+        return f"I'm finished in {where}."
     if name == "Notification":
         kind = event.get("notification_type")
         if kind == "permission_prompt":
-            return f"Sir, Claude needs your permission in {where}."
+            return f"I need your permission in {where}."
         if kind == "elicitation_dialog":
-            return f"Sir, Claude has a question for you in {where}."
+            return f"I need an answer from you in {where}."
         return None  # idle_prompt comes after Stop has spoken already; auth_success is noise
     if name == "PreToolUse":
         tool = event.get("tool_name")
         if tool == "AskUserQuestion":
-            return f"Sir, Claude has a question for you in {where}."
+            return f"I need an answer from you in {where}."
         if tool == "ExitPlanMode":
-            return f"Sir, Claude has a plan for you to check in {where}."
+            return f"I need you to check a plan in {where}."
     return None
 
 

@@ -202,6 +202,39 @@ async def test_queued_prompt_runs_after(home):
         assert not app.queued_panel.display
 
 
+async def test_ctrl_x_s_sends_now(home):
+    app = make(home)
+    async with app.run_test(size=SIZE) as pilot:
+        await ready(pilot)
+        await send(pilot, "slow")
+        await until(pilot, lambda: app.busy and replies(app))
+        app.prompt.set_text("hello")
+        await pilot.press("ctrl+x")
+        assert app.prompt.text == "hello"  # not cut
+        await pilot.press("s")
+        await until(pilot, lambda: "Hello, sir. How may I help?" in replies(app) and not app.busy, timeout=15)
+        assert any("Interrupted" in text_of(n.renderable) for n in entries(app, NoticeEntry))
+        assert [e.text for e in entries(app, UserEntry)] == ["slow", "hello"]
+        assert not app.queued and app.prompt.text == ""
+
+
+async def test_ctrl_x_then_another_key_types_it(home):
+    app = make(home)
+    async with app.run_test(size=SIZE) as pilot:
+        await ready(pilot)
+        app.prompt.set_text("hi")
+        app.prompt.move_cursor((0, 2))
+        await pilot.press("ctrl+x", "a")
+        assert app.prompt.text == "hia" and not entries(app, UserEntry)
+
+
+def test_starts_in_auto_mode(monkeypatch):
+    from jarvis_code.__main__ import parse
+    monkeypatch.delenv("JARVIS_MODE", raising=False)
+    assert parse([]).mode == "auto"
+    assert parse(["--mode", "default"]).mode == "default"
+
+
 async def test_escape_interrupts(home):
     app = make(home)
     async with app.run_test(size=SIZE) as pilot:

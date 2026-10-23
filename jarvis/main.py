@@ -34,7 +34,7 @@ def main():
         from jarvis import tools
         tools.warm_up()  # the voice loop does this itself when it runs
     from jarvis import alerts
-    alerts.start()  # e.g. "Claude has finished": spoken, or posted if voice is off
+    alerts.start()  # e.g. "I'm finished in ...": spoken, or posted if voice is off
     from jarvis import mcp_server
     mcp_server.start()  # Claude sessions on any device, through Tailscale Funnel
     if config.VOICE_ENABLED:

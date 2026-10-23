@@ -242,8 +242,9 @@ which is why step 1 can be done with a personal Microsoft account at portal.azur
 
 ### Claude Code alerts
 
-Jarvis says when a Claude Code session on this laptop is done ("Sir, Claude has finished in
-jarvis.") or needs you to check something: a permission, a question, or a plan to approve. Only
+Jarvis says when a Claude Code session on this laptop is done ("I'm finished in jarvis.") or
+needs you to check something ("I need your permission in jarvis.", "I need an answer from you
+in ...", "I need you to check a plan in ..."), always in those two forms. Only
 things more than 30 s after your last message to that session are said
 (`JARVIS_CLAUDE_MIN_SECONDS`), since before that you're probably still watching. It goes through
 a socket Jarvis listens on (`$XDG_RUNTIME_DIR/jarvis.sock`, `jarvis/alerts.py`; project-mode runs,
@@ -294,8 +295,10 @@ restart Jarvis, and update the connector's URL.
 `jarvis` with nothing after it opens the Jarvis window in the current folder: Claude Code with a
 screen of its own, JARVIS in blue where Claude Code has its orange mascot, and blue wherever
 Claude Code is orange (the spinner, thinking, modes, dialogs). `jarvis -c` continues the last
-conversation in that folder, `jarvis -r` picks one (`jarvis -r <id>` resumes that one). From the
-Windows laptop, `jarvis` opens it on hyde over ssh (docs/terminal.md).
+conversation in that folder, `jarvis -r` picks one (`jarvis -r <id>` resumes that one). It starts
+in auto mode (`--mode default`, or `JARVIS_MODE`, for another). On the Windows laptop, `jarvis`
+runs it there, copied from hyde by `jarvis --update`, and `jarvis --hyde` opens it on hyde over
+ssh (docs/terminal.md).
 
 The answers are Claude Code's own: the window runs the real `claude` headless (`claude -p`,
 stream-json both ways, on the Pro login), so every tool, MCP server (the Jarvis one included),
@@ -307,7 +310,8 @@ The window draws the rest the way Claude Code does: streamed replies, thinking (
 ctrl+o shows it), tool calls with diffs and folded output, permission dialogs, AskUserQuestion,
 plan approval, the task list, subagents, queued prompts and the context left. The keys are
 Claude Code's: shift+tab switches mode (default, accept edits, plan, auto), esc interrupts,
-`\`+enter or ctrl+j adds a line, up and down go through past prompts (shared with Claude Code),
+`\`+enter or ctrl+j adds a line, ctrl+x s sends now (stopping the turn in progress instead of
+queueing), up and down go through past prompts (shared with Claude Code),
 `/` lists commands, `@` files, `!` runs a shell command, ctrl+c twice quits. Commands Claude Code
 runs headless (`/compact`, `/context`, `/model`, `/effort`, `/clear`, skills) go straight to it.
 Claude Code's interactive menus are rebuilt here: `/usage`, `/status`, `/config` and `/stats`
