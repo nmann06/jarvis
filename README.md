@@ -370,7 +370,7 @@ It shares the Pro plan's usage limits with your own Claude Code use (Sonnet by d
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
-(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `project_message` / `resume_project` / `list_projects` (project mode, above), OnQ and Smith Learning (read-only):
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), `speaker_volume` (Jarvis and the music together; Spotify's own volume is the music alone), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `project_message` / `resume_project` / `list_projects` (project mode, above), OnQ and Smith Learning (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
 `onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`),
 `onq_content` (everything posted under Content, plus pages linked from module descriptions, as some
