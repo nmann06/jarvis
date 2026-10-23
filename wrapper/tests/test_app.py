@@ -5,6 +5,7 @@ import io
 import json
 import os
 import sys
+import time
 
 import pytest
 from rich.console import Console
@@ -156,6 +157,22 @@ async def test_shift_tab_cycles_modes(home):
         assert seen == ["acceptEdits", "plan", "auto", "default"]
         await until(pilot, lambda: [m["request"]["mode"] for m in sent(home)
                                     if m.get("request", {}).get("subtype") == "set_permission_mode"] == seen)
+
+
+async def test_footer_shows_when_the_5_hour_session_ends(home):
+    app = make(home)
+    async with app.run_test(size=SIZE) as pilot:
+        await ready(pilot)
+        clock = lambda t: time.strftime("%-I:%M%p", time.localtime(t)).lower().replace(":00", "")
+        await until(pilot, lambda: "5-hour session ends" in app.footer.right)  # from get_usage
+        assert app.session_ends - time.time() == pytest.approx(7200, abs=60)
+        later = int(time.time()) + 3 * 3600
+        app.on_rate_limit({"rate_limit_info": {"status": "allowed", "resetsAt": later, "rateLimitType": "five_hour",
+                                               "unifiedWindows": {"five_hour": {"utilization": 0.1, "resetsAt": later}}}})
+        assert f"5-hour session ends {clock(later)}" in app.footer.right
+        app.session_ends = time.time() - 1  # past: nothing to show until the next turn reports one
+        app.update_footer()
+        assert "5-hour session" not in app.footer.right
 
 
 async def test_slash_menu_completes_and_runs(home):

@@ -361,7 +361,10 @@ def main():
                     {"title": "Environment", "rows": [{"label": "Model", "value": "claude-haiku-5-5"},
                                                       {"label": "Setting sources", "value": "User settings"}]}]})
             elif sub == "get_usage":
-                control_response(rid, USAGE)
+                # The real one also names each window; the 5-hour one resets in two hours here.
+                five_hour = {"utilization": 62, "resets_at": time.strftime(
+                    "%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() + 7200))}
+                control_response(rid, {**USAGE, "rate_limits": {**USAGE["rate_limits"], "five_hour": five_hour}})
             elif sub == "get_session_cost":
                 control_response(rid, {"text": "Total cost:            $0.1200\nTotal duration (API):  4s"})
             elif sub in ("mcp_reconnect", "mcp_toggle", "mcp_clear_auth"):

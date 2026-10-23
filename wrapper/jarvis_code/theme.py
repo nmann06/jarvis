@@ -21,6 +21,7 @@ GRADIENT = ["#96e6ff", "#5acdff", "#28afff", "#148cf0", "#0f69d7", "#0a4bb4"]
 
 ACCENT = "#3cbeff"        # Claude Code's orange: spinner, thinking, the J.A.R.V.I.S. mark
 SHIMMER = "#c2efff"       # the light that runs across the spinner's word
+CURSOR = "#96e6ff"        # the block cursor in the prompt
 LABEL = "#6e96be"         # labels, hints and the prompt's rules
 DIM = "#8592a6"           # dim text
 CODE = "#8ccfff"          # inline code

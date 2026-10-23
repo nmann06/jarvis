@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from rich.console import Group
 from rich.text import Text
@@ -167,7 +168,7 @@ JARVIS_THEME = Theme(
         "ansi-background": "ansi_black", "ansi-foreground": "ansi_white",
         "border": theme.ACCENT, "border-blurred": theme.LABEL,
         "block-cursor-foreground": "ansi_black", "block-cursor-background": theme.ACCENT,
-        "input-cursor-background": "ansi_bright_white", "input-cursor-foreground": "ansi_black",
+        "input-cursor-background": theme.CURSOR, "input-cursor-foreground": "ansi_black",
         "input-cursor-text-style": "none",
         "input-selection-background": "#1f4f7a", "input-selection-foreground": "ansi_default",
         "screen-selection-background": "#1f4f7a", "screen-selection-foreground": "ansi_default",
@@ -277,6 +278,7 @@ class JarvisApp(App):
         self.last_escape = 0.0
         self.context_pct = None
         self.limit_note = ""
+        self.session_ends = None          # when the 5-hour usage window resets (epoch seconds)
         self.file_index = files.FileIndex(self.cwd)
         self.permission_queue = None
         self.branch = ""
@@ -381,7 +383,28 @@ class JarvisApp(App):
         account = self.info.get("account") or {}
         self.banner.set_info(plan=account.get("subscriptionType"), version=self.info.get("claude_code_version"))
         await self.refresh_settings()
+        self.run_worker(self.fetch_session_end(engine), group="usage")
         return True
+
+    async def fetch_session_end(self, engine):
+        """The 5-hour window's reset time for the footer, before the first turn reports it."""
+        try:
+            limits = (await engine.request("get_usage", timeout=90)).get("rate_limits") or {}
+        except EngineError:
+            return
+        when = (limits.get("five_hour") or {}).get("resets_at")
+        when = when or next((l.get("resets_at") for l in limits.get("limits") or []
+                             if l.get("kind") == "session"), None)
+        try:
+            self.set_session_end(datetime.fromisoformat(when.replace("Z", "+00:00")).timestamp())
+        except (AttributeError, ValueError):
+            pass
+
+    def set_session_end(self, when):
+        if when and when != self.session_ends:
+            self.session_ends = when
+            self.set_timer(max(0.0, when - time.time()) + 1, self.update_footer)  # drop it once passed
+            self.update_footer()
 
     async def stop_engine(self):
         engine, self.engine = self.engine, None
@@ -442,7 +465,11 @@ class JarvisApp(App):
             self.footer.right = "Claude Code isn't running"
         else:
             running = len(self.background)
-            parts = (self.limit_note,
+            ends = ""
+            if self.session_ends and self.session_ends > time.time() and "resets" not in self.limit_note:
+                clock = time.strftime("%-I:%M%p", time.localtime(self.session_ends))
+                ends = "5-hour session ends " + clock.lower().replace(":00", "")
+            parts = (self.limit_note, ends,
                      f"{running} background task{'s' if running != 1 else ''}" if running else "",
                      self.model_label(),
                      f"{self.context_pct}% context" if self.context_pct is not None else "")
@@ -764,6 +791,11 @@ class JarvisApp(App):
             if (window.get("utilization") or 0) > worst:
                 worst_name, worst = name, window["utilization"]
         resets = info.get("resetsAt")
+        five_hour = (windows.get("five_hour") or {}).get("resetsAt")
+        if not five_hour and info.get("rateLimitType") == "five_hour":
+            five_hour = resets
+        if five_hour:
+            self.set_session_end(five_hour)
         when = time.strftime("%-I:%M %p", time.localtime(resets)).lower() if resets else ""
         if info.get("status") == "rejected":
             self.limit_note = f"usage limit reached · resets {when}".strip()
