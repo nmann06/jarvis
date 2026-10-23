@@ -69,6 +69,10 @@ SAVE_STOP_AUDIO = os.getenv("SAVE_STOP_AUDIO", "") == "1"  # debugging: keep wha
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
 THINKING_SOUND = os.getenv("THINKING_SOUND", "on") == "on"  # soft blips while waiting on Claude
+# How often a stop or a task gets "Say please." (and waits for it), unless please was said.
+# The first SAY_PLEASE_TESTS times (counted in data/say-please-tests) it always does, to try it.
+SAY_PLEASE_RATE = float(os.getenv("SAY_PLEASE_RATE", "0.05"))
+SAY_PLEASE_TESTS = int(os.getenv("SAY_PLEASE_TESTS", "2"))
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")  # "cuda" or "cpu"
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))

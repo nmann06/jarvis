@@ -289,6 +289,13 @@ class Brain:
         return reply
 
 
+    def forget_last(self):
+        """Drop the last exchange from the history (Jarvis's "Say please.": Claude copied it)."""
+        with self._lock:
+            if self._history:
+                self._history.pop()
+
+
 class _Race:
     """The same streaming request sent more than once at a time (copies), followed through
     whichever starts its reply first; the others are dropped. Now and then the API takes

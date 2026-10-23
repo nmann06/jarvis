@@ -6,6 +6,7 @@ Started by jarvis.main. Each turn logs where its time went (jarvis.latency).
 import json
 import logging
 import queue
+import random
 import re
 import threading
 import time
@@ -221,7 +222,7 @@ STOP_PHRASES = ["stop", "cancel", "stop it", "stop talking", "shut up", "be quie
                 "okay stop", "stop stop", "shut up jarvis", "jarvis shut up"]
 # Not stops, but in the grammar so Vosk has somewhere else to put them: with only the stop
 # phrases to choose from, an echoed "yes sir" came out as "stop".
-_DECOYS = ["sir", "yes sir", "no sir", "of course sir", "certainly sir"]
+_DECOYS = ["sir", "yes sir", "no sir", "of course sir", "certainly sir", "please"]
 _vosk = None
 # Whisper checks this much of the end of a "stop" for echo: long enough for "but it stays",
 # short enough that Jarvis's echo doesn't drown out the owner's "stop".
@@ -304,6 +305,7 @@ def _listen_for_stop(mic, stop, done, saying, reply):
                     rec = _stop_recognizer()
                     continue
                 log.info("heard %r: stopping", text)
+                stop.heard = text
                 stop.set()
                 return
             if text and text != getattr(rec, "_logged", None):
@@ -318,16 +320,80 @@ def _listen_for_stop(mic, stop, done, saying, reply):
                 w.writeframes(np.concatenate(heard).tobytes())
 
 
+# Every now and then a stop or a task gets "Say please." and waits for it (the owner asked).
+SAY_PLEASE = "Say please."
+PLEASE_NOTE = (f"If this asks you to do something (send, draft, add, save, move, start or work on "
+               f"something; not just answer a question), don't do it yet and don't call any tool: "
+               f"reply with exactly \"{SAY_PLEASE}\" and nothing else. Otherwise answer as usual.")
+# The "Say please." exchange is kept out of Claude's history (Claude copied it, unasked), so
+# after the please the request is asked again, with whatever else came with the please.
+_PLEASE_FILLER = {"please", "pretty", "okay", "ok", "fine", "jarvis", "hey", "sir", "now"}
+# Only requests that start like a task get PLEASE_NOTE: with it, Haiku answered "What's the
+# weather?" with "Say please." too.
+_TASK = re.compile(r"^(?:(?:hey |ok |okay )?jarvis[,.]? )?(?:(?:can|could|would|will) you |go |and |"
+                   r"now |i want you to |i need you to )?(?:text|send|message|email|draft|write|"
+                   r"reply|forward|add|make|create|start|build|fix|set up|schedule|book|put|save|"
+                   r"move|finish|remind|delete|work on|research|look into|plan|tell (?!me\b))\b",
+                   re.I)
+PLEASE_ASKS = 3  # "Say please." at most this many times for one request, then let it go
+_awaiting_please = None  # {"kind": "stop" or "task", "asks": n, "request": text} after "Say please."
+
+
+def _said_please(text):
+    return "please" in _word_list(text)
+
+
+def _please_roll(text):
+    """Whether to make the owner say please this time: never if they already did."""
+    if _said_please(text):
+        return False
+    return _please_tests_left() > 0 or random.random() < config.SAY_PLEASE_RATE
+
+
+def _please_after_stop(mic, seconds=1.0):
+    """Whether the owner said "stop, please": the stop fires on "stop", before the please."""
+    blocks, end = [], time.monotonic() + seconds
+    while time.monotonic() < end:
+        if (block := mic.read(timeout=0.1)) is not None:
+            blocks.append(block)
+    if not blocks:
+        return False
+    heard = stt.transcribe(np.concatenate(blocks).astype(np.float32) / 32768)
+    return _said_please(heard)
+
+
+def _please_tests_path():
+    return config.ROOT / "data" / "say-please-tests"
+
+
+def _please_tests_left():
+    try:
+        return config.SAY_PLEASE_TESTS - int(_please_tests_path().read_text())
+    except (OSError, ValueError):
+        return config.SAY_PLEASE_TESTS
+
+
+def _asked_please(kind, request=None):
+    """Jarvis has just said "Say please.": wait for it, and count a test run."""
+    global _awaiting_please
+    _awaiting_please = {"kind": kind, "asks": 1, "request": request}
+    if (left := _please_tests_left()) > 0:
+        path = _please_tests_path()
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(str(config.SAY_PLEASE_TESTS - left + 1))
+    log.info("said %r after a %s; waiting for please", SAY_PLEASE, kind)
+
+
 _unfinished = None  # (texts, index of the sentence cut off) after "stop", for "continue"
 
 
-def _speak(mic, texts, thinking=False, timing=None):
+def _speak(mic, texts, thinking=False, timing=None, stop=None):
     """Speak texts (a list, or _Sentences still streaming in), stopping if the owner says stop.
     thinking plays the thinking sound while waiting on texts; timing is a latency.Turn. Returns
     (time speech started or None, whether it was stopped). When stopped, remembers where, so
     "continue" can resume."""
     global _unfinished
-    stop, done = threading.Event(), threading.Event()
+    stop, done = stop or threading.Event(), threading.Event()
     saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
               else (lambda: " ".join(texts)))
     reply = ((lambda: " ".join(texts.spoken)) if isinstance(texts, _Sentences)
@@ -380,7 +446,7 @@ def handle(mic, brain, utterance, follow_up=False):
 
 
 def _answer(mic, brain, utterance, follow_up, turn):
-    global _last_reply, _unfinished
+    global _last_reply, _unfinished, _awaiting_please
     text, started, finished = utterance.transcribe()  # usually done during the pause already
     turn.transcribed(text, started, finished)
     if not text:
@@ -392,6 +458,29 @@ def _answer(mic, brain, utterance, follow_up, turn):
         log.info("just the wake word: listening again")
         turn.outcome = "woken again"
         return WOKEN
+    note = None  # for Claude, this turn only
+    if _awaiting_please:
+        waiting, _awaiting_please = _awaiting_please, None
+        if _said_please(text):
+            log.info("heard please: going ahead with the %s", waiting["kind"])
+            if waiting["kind"] == "stop":
+                _unfinished = None
+                with _speaker:
+                    _speak(mic, ["Thank you, sir."], timing=turn)
+                mic.clear()
+                turn.outcome = "stopped after please"
+                return False
+            extra = set(_word_list(text)) - _PLEASE_FILLER
+            text = waiting["request"] + (f" ({text})" if extra else "")
+            note, follow_up = "", False  # "": no PLEASE_NOTE this time
+        elif follow_up and waiting["asks"] < PLEASE_ASKS:
+            with _speaker:  # no please yet: keep waiting
+                _speak(mic, [SAY_PLEASE], timing=turn)
+            mic.clear()
+            _awaiting_please = dict(waiting, asks=waiting["asks"] + 1)
+            turn.outcome = "still waiting for please"
+            return True
+        # else: woken for something new (or asked enough times): the request is dropped
     if follow_up and _ADDRESSED.match(text):
         follow_up = False  # "Jarvis, ..." is meant for Jarvis
     if follow_up and _last_reply and "?" in _last_reply:
@@ -427,12 +516,14 @@ def _answer(mic, brain, utterance, follow_up, turn):
     if p is not None and _END_PROJECT.fullmatch(_words(text)):
         return _end_project(mic, p, turn)
     sentences, result = _Sentences(), {}
+    if note is None and _TASK.match(text) and _please_roll(text):
+        note = PLEASE_NOTE
+    context = "\n\n".join(c for c in (project.context(p) if p else None, note) if c) or None
 
     def think():
         try:
             result["reply"] = brain.ask(text, follow_up=follow_up, on_text=sentences.add,
-                                        timing=turn, on_tool=sentences.tool,
-                                        context=project.context(p) if p else None)
+                                        timing=turn, on_tool=sentences.tool, context=context)
         except Exception as e:
             result["error"] = e
         finally:
@@ -442,11 +533,21 @@ def _answer(mic, brain, utterance, follow_up, turn):
     with _speaker:
         thinker.start()
         # Speaks while Claude is still writing, with the thinking sound while it waits.
-        _, stopped = _speak(mic, sentences, thinking=config.THINKING_SOUND, timing=turn)
+        stop = threading.Event()
+        _, stopped = _speak(mic, sentences, thinking=config.THINKING_SOUND, timing=turn,
+                            stop=stop)
         if stopped:
             # "Stop" or "cancel": Claude may still be writing, but nobody wants the rest.
-            mic.clear()
             turn.outcome = "stopped"
+            # (Before the mic is cleared: the please of "stop, please" may be queued already.)
+            if _please_roll(getattr(stop, "heard", "")) and not _please_after_stop(mic):
+                mic.clear()
+                tts.speak_all([SAY_PLEASE])
+                mic.clear()
+                _asked_please("stop")
+                turn.outcome = "stopped, said say please"
+                return True  # the follow-up window, for the please
+            mic.clear()
             return False
         thinker.join()
         if "error" in result:
@@ -464,6 +565,10 @@ def _answer(mic, brain, utterance, follow_up, turn):
                 return False
     _last_reply = turn.reply = " ".join(sentences.spoken) or reply
     turn.outcome = "answered"
+    if note == PLEASE_NOTE and _last_reply.strip().lower() == SAY_PLEASE.lower():
+        brain.forget_last()
+        _asked_please("task", text)
+        turn.outcome = "said say please"
     log.info("jarvis: %s", _last_reply)
     mic.clear()  # drop Jarvis's own voice picked up by the mic
     if "project_message" in sentences.tools or "start_project" in sentences.tools:
