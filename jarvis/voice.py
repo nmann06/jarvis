@@ -17,7 +17,7 @@ import numpy as np
 import sounddevice as sd
 
 from jarvis import audio, config, latency, learn, llm, notify, project, stt, tools, tts
-from jarvis.tools import imessage
+from jarvis.tools import imessage, spotify
 from jarvis.tools.clock import TZ
 from jarvis.wakeword import WakeWord
 
@@ -50,9 +50,11 @@ def say(text):
     global _alert_until
     with _speaker:
         _alert_until = float("inf")
+        spotify.duck(True)
         try:
             return tts.speak(text)
         finally:
+            spotify.duck(False)
             _alert_until = time.perf_counter() + 1.0  # the mic's audio lags the speaker a little
 
 
@@ -646,6 +648,7 @@ def run():
     tts.get_voice()
     _stop_recognizer()
     notify.register("voice", say)
+    spotify.duck(False)  # music left turned down by a crash comes back up
     with audio.Mic() as mic:
         log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)", config.WAKE_THRESHOLD)
         while True:
@@ -658,6 +661,7 @@ def run():
                 log.info("wake (score %.2f) during an alert: ignored", score)
                 continue
             log.info("wake (score %.2f)", score)
+            spotify.duck(True)  # music on Jarvis's speaker turned down until the end chime
             # While the owner talks, get Claude's cache ready for the conversation so far.
             threading.Thread(target=brain.prewarm, name="prewarm", daemon=True).start()
             play(CHIME)
@@ -679,5 +683,6 @@ def run():
                                                    wait_seconds=config.FOLLOW_UP_SECONDS)
                 follow_up = True
             play(END_CHIME)
+            spotify.duck(False)
             mic.clear()
 

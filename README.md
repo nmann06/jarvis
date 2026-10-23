@@ -188,6 +188,21 @@ moving playback to another device. Controlling playback needs Spotify Premium.
 3. `.venv/bin/python -m jarvis.tools.spotify login`, open the link (a phone is fine), agree, and
    paste back the `http://127.0.0.1:8767/callback?code=...` address the browser ends up on (it
    won't load; that's expected). Then `systemctl --user restart jarvis`.
+4. Jarvis's own speaker as a Spotify device: spotifyd (a headless Spotify Connect player) runs
+   as the user service `spotifyd`, shows up in Spotify as **Jarvis**, and plays through the
+   default PipeWire sink (the echo-cancel sink, so "Hey Jarvis" is still heard over the music).
+   "Play X" goes there unless you name another device (`SPOTIFY_SPEAKER` in `.env` to rename).
+   While Jarvis listens and talks the music drops to 20% (`spotify.duck`, on spotifyd's stream
+   only), and comes back up after the end chime.
+   ```
+   # binary from github.com/Spotifyd/spotifyd/releases (linux-x86_64-full, has PulseAudio)
+   mkdir -p ~/.local/opt/spotifyd-0.4.2 && tar xzf spotifyd-linux-x86_64-full.tar.gz -C ~/.local/opt/spotifyd-0.4.2
+   ln -s ~/.local/opt/spotifyd-0.4.2/spotifyd ~/.local/bin/spotifyd
+   spotifyd auth --cache-path ~/.cache/spotifyd   # open the link, paste-free if on this laptop;
+   # from another device, run: curl '<the http://127.0.0.1:8000/login?code=... address>'
+   ln -s ~/jarvis/deploy/spotifyd.service ~/.config/systemd/user/
+   systemctl --user daemon-reload && systemctl --user enable --now spotifyd
+   ```
 
 ### OneDrive setup
 
