@@ -32,6 +32,7 @@ class Session:
     modified: float
     prompts: int
     branch: str
+    cwd: str = ""  # the folder it ran in
 
 
 def prompt_text(message):
@@ -50,9 +51,10 @@ def prompt_text(message):
 
 
 def summarize(path):
-    """Title, prompt count and branch of one saved conversation, reading only what's needed."""
+    """Title, prompt count, branch, whether it was continued elsewhere, and the folder it ran
+    in, of one saved conversation, reading only what's needed."""
     title = ai_title = first_prompt = None
-    prompts, branch, continued = 0, "", False
+    prompts, branch, continued, cwd = 0, "", False, ""
     with open(path, errors="replace") as f:
         for line in f:
             if '"type":"user"' in line or '"type": "user"' in line:
@@ -67,6 +69,7 @@ def summarize(path):
                     prompts += 1
                     first_prompt = first_prompt or text
                 branch = record.get("gitBranch") or branch
+                cwd = cwd or record.get("cwd") or ""
             elif "custom-title" in line or "ai-title" in line or "continued-in" in line:
                 try:
                     record = json.loads(line)
@@ -79,31 +82,77 @@ def summarize(path):
                     ai_title = record.get("aiTitle") or ai_title
                 elif kind == "continued-in":
                     continued = True
-    return (title or ai_title or first_prompt or "(no prompt)"), prompts, branch, continued
+    return (title or ai_title or first_prompt or "(no prompt)"), prompts, branch, continued, cwd
 
 
-def list_sessions(cwd, limit=60):
-    """Conversations started in this directory, newest first."""
-    directory = project_dir(cwd)
+def _jsonl(directory):
     try:
-        names = [n for n in os.listdir(directory) if n.endswith(".jsonl")]
+        return [os.path.join(directory, n) for n in os.listdir(directory) if n.endswith(".jsonl")]
     except OSError:
         return []
-    paths = sorted((os.path.join(directory, n) for n in names), key=os.path.getmtime, reverse=True)
-    sessions = []
-    for path in paths:
-        if len(sessions) >= limit:
+
+
+def _sessions(paths, limit):
+    """Session for each conversation file, newest first, leaving out empty and continued ones."""
+    found = []
+    for path in sorted(paths, key=_mtime, reverse=True):
+        if limit is not None and len(found) >= limit:
             break
         try:
-            title, prompts, branch, continued = summarize(path)
+            title, prompts, branch, continued, cwd = summarize(path)
             modified = os.path.getmtime(path)
         except OSError:
             continue
         if prompts == 0 or continued:
             continue
-        sessions.append(Session(os.path.basename(path)[:-6], path, " ".join(title.split()),
-                                modified, prompts, branch))
-    return sessions
+        found.append(Session(os.path.basename(path)[:-6], path, " ".join(title.split()),
+                             modified, prompts, branch, cwd))
+    return found
+
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+def list_sessions(cwd, limit=60):
+    """Conversations started in this directory, newest first."""
+    return _sessions(_jsonl(project_dir(cwd)), limit)
+
+
+def list_all_sessions(limit=None):
+    """Conversations from every folder, newest first."""
+    return _sessions([p for d in _project_dirs() for p in _jsonl(os.path.join(PROJECTS, d))], limit)
+
+
+def saved_title(path):
+    """The conversation's title (set with /rename, or written by Claude Code or add_title), or None."""
+    title = None
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                if "custom-title" in line or "ai-title" in line:
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    if record.get("type") == "custom-title" and record.get("customTitle"):
+                        return record["customTitle"]
+                    if record.get("type") == "ai-title":
+                        title = record.get("aiTitle") or title
+    except OSError:
+        return None
+    return title
+
+
+def add_title(path, session_id, title):
+    """Give the conversation a title the way Claude Code does (an ai-title record), so /resume
+    here and in plain Claude Code shows it. Headless Claude Code doesn't write one itself."""
+    with open(path, "a") as f:
+        f.write(json.dumps({"type": "ai-title", "aiTitle": title, "sessionId": session_id},
+                           separators=(",", ":")) + "\n")
 
 
 def find_session(cwd, session_id):

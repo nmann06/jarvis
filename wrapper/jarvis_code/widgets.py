@@ -486,6 +486,11 @@ class PromptInput(TextArea):
         # Anything else goes on to TextArea's own _on_key: Textual calls the handler of each
         # class in the chain until one prevents the default.
 
+    def action_cursor_left(self, select=False):
+        if not select and not self.text and self.app.show_all_sessions():
+            return  # left arrow on an empty prompt: every saved conversation
+        super().action_cursor_left(select)
+
     def action_cursor_up(self, select=False):
         if not select and self.app.menu_move(-1):
             return
@@ -686,6 +691,7 @@ class Dialog(Vertical):
         self.multi = multi
         self.picked = set()
         self.index = 0
+        self.first = 0  # number of the first choice shown, less one (a Picker scrolls)
         self.hint = hint
         self.colour = colour
         self.result = asyncio.get_running_loop().create_future()
@@ -727,11 +733,18 @@ class Dialog(Vertical):
                 label, description = label
             else:
                 description = ""
-            row = Text.assemble((pointer, theme.ACCENT), (f"{n + 1}. {box}{label}", style))
+            row = Text.assemble((pointer, theme.ACCENT), (f"{self.first + n + 1}. {box}{label}", style))
             if description:
                 row.append(f"  {' '.join(description.split())}", style=theme.DIM)
             rows.append(row)
+        more = self.more()
+        if more:
+            rows.append(Text(f"  {more}", style=theme.DIM))
         self.choice_view.update(Group(*rows))
+
+    def more(self):
+        """A line under the choices about ones not shown, if any."""
+        return ""
 
     def finish(self, value):
         if not self.result.done():
@@ -791,14 +804,19 @@ class Dialog(Vertical):
 
 
 class Picker(Dialog):
-    """A dialog listing many things (sessions, models) with a filter line on top."""
+    """A dialog listing many things (sessions, models) with a filter line on top. Nine show at
+    a time; the arrows (and page up/down) scroll through the rest."""
 
-    def __init__(self, title, items, hint="Type to filter · Enter to pick · Esc to cancel"):
+    ROWS = 9
+
+    def __init__(self, title, items, hint="Type to filter · ↑↓ to scroll · Enter to pick · Esc to cancel"):
         self.all_items = items  # (value, label, description)
         self.filter = Input(placeholder="Type to search…", compact=True)
-        super().__init__(title, choices=[(label, d) for _, label, d in items[:9]], hint=hint)
-        self.shown = items[:9]
+        super().__init__(title, hint=hint)
+        self.matches = list(items)
+        self.cursor = 0  # in matches
         self.applied = ""
+        self.point_at(0)
 
     def compose(self):
         yield Static(Text(self.title_text), classes="title")
@@ -809,17 +827,32 @@ class Picker(Dialog):
     def take_focus(self):
         self.filter.focus()
 
+    def point_at(self, cursor):
+        """Point at matches[cursor], moving the window of shown rows to keep it in view."""
+        self.cursor = cursor % len(self.matches) if self.matches else 0
+        if self.cursor < self.first:
+            self.first = self.cursor
+        elif self.cursor >= self.first + self.ROWS:
+            self.first = self.cursor - self.ROWS + 1
+        self.first = max(0, min(self.first, len(self.matches) - self.ROWS))
+        self.shown = self.matches[self.first:self.first + self.ROWS]
+        self.choices = [(label, d) for _, label, d in self.shown] or [("(nothing matches)", "")]
+        self.index = self.cursor - self.first
+
+    def more(self):
+        above, below = self.first, len(self.matches) - self.first - len(self.shown)
+        return " · ".join(part for part in (above and f"↑ {above} more", below and f"↓ {below} more") if part)
+
     def apply_filter(self):
         """Match the list to the filter as typed now (its change can arrive after Enter)."""
         q = self.filter.value.lower().strip()
         if q == self.applied:
             return
         self.applied = q
-        matches = [item for item in self.all_items
-                   if not q or q in item[1].lower() or q in (item[2] or "").lower()]
-        self.shown = matches[:9]
-        self.choices = [(label, d) for _, label, d in self.shown] or [("(nothing matches)", "")]
-        self.index = 0
+        self.matches = [item for item in self.all_items
+                        if not q or q in item[1].lower() or q in (item[2] or "").lower()]
+        self.first = 0
+        self.point_at(0)
         self.redraw()
 
     def on_input_changed(self, event: Input.Changed):
@@ -831,10 +864,12 @@ class Picker(Dialog):
             self.finish(self.shown[self.index][0])
 
     def dialog_key(self, key):
-        if key == "up":
-            self.index = (self.index - 1) % len(self.choices)
-        elif key == "down":
-            self.index = (self.index + 1) % len(self.choices)
+        steps = {"up": -1, "down": 1, "pageup": -self.ROWS, "pagedown": self.ROWS}
+        if key in steps:
+            if key.startswith("page"):  # stop at the ends rather than wrapping
+                self.point_at(max(0, min(len(self.matches) - 1, self.cursor + steps[key])))
+            else:
+                self.point_at(self.cursor + steps[key])
         elif key == "enter":
             self.pick()
         elif key == "escape":
