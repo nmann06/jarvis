@@ -5,7 +5,7 @@ After=pipewire.service pipewire-pulse.service wireplumber.service network-online
 Wants=pipewire.service pipewire-pulse.service wireplumber.service
 
 [Service]
-ExecStart=%h/.local/bin/spotifyd --no-daemon --config-path %h/jarvis/deploy/spotifyd.conf --cache-path %h/.cache/spotifyd
+ExecStart=%h/.local/bin/spotifyd --no-daemon --config-path %h/.config/spotifyd/spotifyd.conf --cache-path %h/.cache/spotifyd
 Restart=always
 RestartSec=10
 

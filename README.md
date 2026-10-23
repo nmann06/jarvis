@@ -200,7 +200,8 @@ moving playback to another device. Controlling playback needs Spotify Premium.
    ln -s ~/.local/opt/spotifyd-0.4.2/spotifyd ~/.local/bin/spotifyd
    spotifyd auth --cache-path ~/.cache/spotifyd   # open the link, paste-free if on this laptop;
    # from another device, run: curl '<the http://127.0.0.1:8000/login?code=... address>'
-   ln -s ~/jarvis/deploy/spotifyd.service ~/.config/systemd/user/
+   install -Dm644 ~/jarvis/deploy/spotifyd.conf ~/.config/spotifyd/spotifyd.conf
+   cp ~/jarvis/deploy/spotifyd.service ~/.config/systemd/user/
    systemctl --user daemon-reload && systemctl --user enable --now spotifyd
    ```
 
