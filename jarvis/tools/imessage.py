@@ -10,6 +10,7 @@ back to the owner; messages_send only sends a draft made in an earlier turn, so 
 had a chance to hear it and say yes. Setup: IMESSAGE_SSH in .env (README: iMessage setup).
 """
 
+import difflib
 import json
 import shlex
 import subprocess
@@ -114,7 +115,14 @@ def _resolve(to):
         names = _names()
         return to.strip(), _who(to.strip(), names)
     want = to.strip().lower()
-    matches = sorted({(name, key) for key, name in _names().items() if want in name.lower()})
+    names = _names()
+    matches = sorted({(name, key) for key, name in names.items() if want in name.lower()})
+    if not matches:
+        # Speech-to-text spells names as it hears them ("Tampon" for Thampon): the closest name.
+        def closeness(name):
+            return max(difflib.SequenceMatcher(None, want, part).ratio()
+                       for part in [name.lower(), *name.lower().split()])
+        matches = sorted({(name, key) for key, name in names.items() if closeness(name) >= 0.8})
     if not matches:
         raise ValueError(f"No contact called {to!r} on the Mac; give a number instead")
     people = {name for name, _ in matches}

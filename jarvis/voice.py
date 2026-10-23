@@ -380,6 +380,11 @@ def _answer(mic, brain, utterance, follow_up, turn):
         return WOKEN
     if follow_up and _ADDRESSED.match(text):
         follow_up = False  # "Jarvis, ..." is meant for Jarvis
+    if follow_up and _last_reply and "?" in _last_reply:
+        # Jarvis just asked something ("Who should it say? Tell me the message and I'll draft
+        # it."; the question isn't always last), so this is the answer, however
+        # much it sounds like talk to someone else: Claude ignored "This is sick as fuck" here.
+        follow_up = False
     if _last_reply and is_repeat_request(text):
         log.info("repeating last reply (local, no Claude)")
         with _speaker:
