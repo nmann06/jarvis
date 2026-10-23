@@ -188,24 +188,26 @@ moving playback to another device. Controlling playback needs Spotify Premium.
 3. `.venv/bin/python -m jarvis.tools.spotify login`, open the link (a phone is fine), agree, and
    paste back the `http://127.0.0.1:8767/callback?code=...` address the browser ends up on (it
    won't load; that's expected). Then `systemctl --user restart jarvis`.
-4. Jarvis's own speaker as a Spotify device: spotifyd (a headless Spotify Connect player) runs
-   as the user service `spotifyd`, shows up in Spotify as **Jarvis**, and plays through the
-   default PipeWire sink (the echo-cancel sink, so "Hey Jarvis" is still heard over the music).
+4. Jarvis's own speaker as a Spotify device: Spotify Soloist (Spotify's official headless
+   Connect player) runs as the user service `soloist`, shows up in Spotify as **Jarvis**, and
+   plays through the default PipeWire sink (the echo-cancel sink, so "Hey Jarvis" is still heard
+   over the music). It replaced spotifyd in October 2026: Spotify started refusing librespot's
+   audio keys ("error audio key 0 1", every track skipped at 0:00; librespot issue #1649).
    "Play X" goes there unless you name another device (`SPOTIFY_SPEAKER` in `.env` to rename).
-   While Jarvis listens and talks the music drops to 20% (`spotify.duck`, on spotifyd's stream
+   While Jarvis listens and talks the music drops to 20% (`spotify.duck`, on the speaker's stream
    only), and comes back up after the end chime.
    Music is louder than Jarvis's voice: `echo-cancel-sink` is at 100%, and Jarvis's own stream
    ("PipeWire ALSA [python3.12]") at 65% (-11 dB), which WirePlumber remembers
    (~/.local/state/wireplumber/restore-stream) and applies to every new Jarvis stream.
+   Soloist builds expire 90 days after their build date; Jarvis warns in Discord 14 and 3 days
+   before, and `deploy/update-soloist.sh` installs the latest build and restarts the service.
    ```
-   # binary from github.com/Spotifyd/spotifyd/releases (linux-x86_64-full, has PulseAudio)
-   mkdir -p ~/.local/opt/spotifyd-0.4.2 && tar xzf spotifyd-linux-x86_64-full.tar.gz -C ~/.local/opt/spotifyd-0.4.2
-   ln -s ~/.local/opt/spotifyd-0.4.2/spotifyd ~/.local/bin/spotifyd
-   spotifyd auth --cache-path ~/.cache/spotifyd   # open the link, paste-free if on this laptop;
-   # from another device, run: curl '<the http://127.0.0.1:8000/login?code=... address>'
-   install -Dm644 ~/jarvis/deploy/spotifyd.conf ~/.config/spotifyd/spotifyd.conf
-   cp ~/jarvis/deploy/spotifyd.service ~/.config/systemd/user/
-   systemctl --user daemon-reload && systemctl --user enable --now spotifyd
+   # API key: developer.spotify.com -> Soloist API Key page -> generate (needs Premium)
+   mkdir -p ~/.config/soloist && (umask 077; echo 'SOLOIST_API_KEY=<key>' > ~/.config/soloist/soloist.env)
+   ~/jarvis/deploy/update-soloist.sh   # downloads to ~/.local/opt/soloist-<version>, links ~/.local/bin/soloist
+   cp ~/jarvis/deploy/soloist.service ~/.config/systemd/user/
+   systemctl --user daemon-reload && systemctl --user enable --now soloist
+   # once: pick "Jarvis" in the Spotify app's device list (same network) so it signs in
    ```
 
 ### OneDrive setup

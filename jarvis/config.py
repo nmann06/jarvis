@@ -54,7 +54,7 @@ TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/authorize
 TRELLO_BOARD = os.getenv("TRELLO_BOARD", "todo")  # main todo board
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")  # from developer.spotify.com/dashboard
-# Spotify device that plays out of Jarvis's own speaker (spotifyd, deploy/spotifyd.conf); music
+# Spotify device that plays out of Jarvis's own speaker (Soloist, deploy/soloist.service); music
 # goes there unless the owner names another device.
 SPOTIFY_SPEAKER = os.getenv("SPOTIFY_SPEAKER", "Jarvis")
 ONEDRIVE_CLIENT_ID = os.getenv("ONEDRIVE_CLIENT_ID", "")  # Entra app registration (README)

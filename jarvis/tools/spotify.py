@@ -111,7 +111,7 @@ def spotify_now_playing():
 
 def _device(name):
     """The id of the device whose name contains name, or None for the active device. With no
-    name, Jarvis's own speaker (spotifyd); if that isn't running, the active device, or with
+    name, Jarvis's own speaker (Soloist); if that isn't running, the active device, or with
     nothing active the first available one, so "play X" still works."""
     devices = (_call("GET", "/me/player/devices") or {}).get("devices", [])
     if name:
@@ -240,6 +240,7 @@ def spotify_devices(move_to):
 
 
 DUCK_VOLUME = "20%"
+SPEAKER_BINARIES = ("soloist", "spotifyd")  # whose PipeWire streams get ducked
 _ducks = 0
 _duck_lock = threading.Lock()
 
@@ -247,7 +248,7 @@ _duck_lock = threading.Lock()
 def duck(on):
     """Turn the music on Jarvis's speaker down while Jarvis listens and talks (on=True), and back
     up after (on=False). Calls nest: the music comes back up when the last one ends. Done on
-    spotifyd's PipeWire stream, so it is instant and leaves Spotify's own volume alone."""
+    the speaker's PipeWire stream, so it is instant and leaves Spotify's own volume alone."""
     global _ducks
     with _duck_lock:
         _ducks = _ducks + 1 if on else max(_ducks - 1, 0)
@@ -257,7 +258,7 @@ def duck(on):
             streams = json.loads(subprocess.run(["pactl", "-f", "json", "list", "sink-inputs"],
                                                 capture_output=True, text=True, timeout=2).stdout)
             for s in streams:
-                if s["properties"].get("application.process.binary") == "spotifyd":
+                if s["properties"].get("application.process.binary") in SPEAKER_BINARIES:
                     subprocess.run(["pactl", "set-sink-input-volume", str(s["index"]),
                                     DUCK_VOLUME if on else "100%"], timeout=2)
         except (OSError, ValueError, subprocess.SubprocessError) as e:

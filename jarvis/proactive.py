@@ -16,6 +16,7 @@ If Jarvis was off when reminders were due, only the most recent missed one is se
 import json
 import logging
 import re
+import subprocess
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -48,6 +49,10 @@ REMIND_BEFORE = {
     "work": [timedelta(days=2), timedelta(days=1)],
 }
 POWER_SUPPLIES = Path("/sys/class/power_supply")
+SOLOIST = Path.home() / ".local" / "bin" / "soloist"  # Jarvis's Spotify speaker (deploy/soloist.service)
+SOLOIST_LIFETIME = timedelta(days=90)  # builds stop working 90 days after their build date
+SOLOIST_WARN_BEFORE = [14, 3]  # days
+SOLOIST_EVERY = 6 * 60 * 60  # seconds between build-expiry checks
 BATTERY_WARN_AT = [20, 10]  # percent
 ALL_DAY_TIME = 9  # an all-day deadline counts as due at 9 am for reminders
 LATEST_REMINDER_HOUR = 22  # a reminder that would go out later (e.g. for 11:59 PM work) goes at 10 pm
@@ -271,6 +276,30 @@ def check_power(state, now):
     state["power"], state["battery_warned"] = "battery", sorted(warned | set(due))
 
 
+# --- Spotify speaker ------------------------------------------------------------------------
+
+def soloist_expiry():
+    """The day the installed Soloist build stops working, or None if it isn't installed."""
+    if not SOLOIST.exists():
+        return None
+    out = subprocess.run([SOLOIST, "--version"], capture_output=True, text=True, timeout=10).stdout
+    built = re.search(r"\((\d{8})\)", out)  # soloist 1.3.10.13 build 1792778483 (20261023) ...
+    return datetime.strptime(built[1], "%Y%m%d").date() + SOLOIST_LIFETIME if built else None
+
+
+def check_soloist(state, now):
+    expires = soloist_expiry()
+    if expires is None:
+        return
+    left = (expires - now.date()).days
+    done = set(state.get("soloist_warned", {}).get(expires.isoformat(), []))
+    due = [d for d in SOLOIST_WARN_BEFORE if left <= d and d not in done]
+    if due:
+        notify.post(f"🎵 Jarvis's Spotify speaker (Soloist) stops working {expires:%a %b %d}"
+                    f" ({left} days). Update it with `~/jarvis/deploy/update-soloist.sh`.")
+    state["soloist_warned"] = {expires.isoformat(): sorted(done | set(due))}
+
+
 # --- morning briefing ----------------------------------------------------------------------
 
 def _describe(event):
@@ -341,6 +370,7 @@ def run():
         state, now = _load(), datetime.now(TZ)
         for name, check, every in (("briefing", check_briefing, 0),
                                    ("power", check_power, 0),
+                                   ("soloist", check_soloist, SOLOIST_EVERY),
                                    ("reminders", check_reminders, REMINDER_EVERY),
                                    ("onq", check_onq, ONQ_EVERY),
                                    ("email", check_email, EMAIL_EVERY)):
