@@ -105,8 +105,25 @@ def messages_draft(to, text):
     handle, name = _resolve(to)
     with _lock:
         _draft = {"to": handle, "name": name, "text": text, "made": tools.turn}
-    return (f"Draft to {name} ({handle}): \"{text}\". Not sent: read it back and ask the owner to "
-            "confirm before calling messages_send.")
+    # The number only when there's no contact name to say: the owner knows who their contacts are.
+    who = f"{name} (don't say the number)" if name != handle else spoken_number(handle)
+    return (f"Draft to {who}: \"{text}\". Not sent: read it back and ask the owner to confirm "
+            "before calling messages_send.")
+
+
+_DIGITS = "zero one two three four five six seven eight nine".split()
+
+
+def spoken_number(handle):
+    """A phone number as said aloud, digit by digit in groups ("four one six, eight zero six,
+    six seven four zero"), so it's never read as "four billion..."; an email as it is."""
+    digits = _digits(handle)
+    if "@" in handle or not digits:
+        return handle
+    if len(digits) == 11 and digits[0] == "1":
+        digits = digits[1:]
+    groups = [digits[:3], digits[3:6], digits[6:]] if len(digits) == 10 else [digits]
+    return ", ".join(" ".join(_DIGITS[int(d)] for d in g) for g in groups)
 
 
 def _resolve(to):
@@ -128,6 +145,12 @@ def _resolve(to):
     people = {name for name, _ in matches}
     if len(people) > 1:
         raise ValueError("Several contacts match: " + ", ".join(sorted(people)[:8]))
+    phones = [(name, key) for name, key in matches if key.isdigit()]
+    matches = phones or matches  # a number and an email of the same person: text the number
+    if len(matches) > 1:  # one name, several numbers (or several contacts with the same name)
+        raise ValueError(f"{matches[0][0]} has more than one number: "
+                         + "; ".join(spoken_number(key) for _, key in matches[:5])
+                         + ". Read them out like that and ask the owner which one.")
     name, key = matches[0]
     return (f"+1{key}" if key.isdigit() and len(key) == 10 else key), name
 

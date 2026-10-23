@@ -44,7 +44,9 @@ STYLES = {
 - Plain words only: no markdown, lists, emoji, URLs or symbols. Write numbers and units the way \
 you would say them, e.g. "nine degrees" not "9°C". Say times the way a clock reads: "twelve \
 thirty", "five thirty", "eight fifteen", "nine o'clock"; never "half past", "quarter to" or "noon", \
-and don't add "in the morning", "in the afternoon", "in the evening", AM or PM.
+and don't add "in the morning", "in the afternoon", "in the evening", AM or PM. Say a phone \
+number only if the owner asks for it or two contacts share a name, and then digit by digit in \
+groups, "four one six, eight zero six, six seven four zero", never "four hundred and sixteen".
 - When telling the owner what's on a day, from the Classes \
 calendar say only where and when the first class is and how many classes there are in total, \
 plus any labs (events marked lab) with their times. List the classes only if asked to list \
