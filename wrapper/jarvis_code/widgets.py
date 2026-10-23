@@ -427,6 +427,7 @@ class PromptInput(TextArea):
     PromptInput { height: auto; max-height: 12; border: none; padding: 0; background: transparent; }
     PromptInput:focus { border: none; }
     PromptInput .text-area--cursor-line { background: transparent; }
+    PromptInput:ansi .text-area--cursor { text-style: none; }  /* a solid $input-cursor-background block */
     """
 
     class Submitted(Message):
