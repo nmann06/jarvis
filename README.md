@@ -194,6 +194,9 @@ moving playback to another device. Controlling playback needs Spotify Premium.
    "Play X" goes there unless you name another device (`SPOTIFY_SPEAKER` in `.env` to rename).
    While Jarvis listens and talks the music drops to 20% (`spotify.duck`, on spotifyd's stream
    only), and comes back up after the end chime.
+   Music is louder than Jarvis's voice: `echo-cancel-sink` is at 100%, and Jarvis's own stream
+   ("PipeWire ALSA [python3.12]") at 65% (-11 dB), which WirePlumber remembers
+   (~/.local/state/wireplumber/restore-stream) and applies to every new Jarvis stream.
    ```
    # binary from github.com/Spotifyd/spotifyd/releases (linux-x86_64-full, has PulseAudio)
    mkdir -p ~/.local/opt/spotifyd-0.4.2 && tar xzf spotifyd-linux-x86_64-full.tar.gz -C ~/.local/opt/spotifyd-0.4.2
