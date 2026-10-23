@@ -331,10 +331,8 @@ opens the same conversation in plain Claude Code (for its own screens like `/plu
 `/login`), coming back when you exit it. Permission dialogs also run the `Notification` hooks,
 which headless Claude Code skips, so the alerts above still say when it's waiting on you.
 
-It lives in `wrapper/`: `jarvis-code` starts `jarvis_code/` from its own venv (Textual), set up
-with `python3 -m venv wrapper/.venv && wrapper/.venv/bin/pip install -r wrapper/requirements.txt`.
-`wrapper/.venv/bin/python -m pytest wrapper` runs its tests against a fake Claude Code
-(`tests/fake_claude.py`), and `jarvis --log FILE` records everything said with the real one.
+It lives in its own repo, [jarvis-wrapper](https://github.com/nmann06/jarvis-wrapper), cloned
+to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 
 ## Checks
 

@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# The Jarvis window: Claude Code with a screen of its own (jarvis_code/, run from its venv by launch.py).
-here="$(dirname "$(readlink -f "$0")")"
-export COLORTERM="${COLORTERM:-truecolor}"  # ssh doesn't pass it on; Windows Terminal does 24-bit
-exec "$here/.venv/bin/python" -I "$here/launch.py" "$@"
