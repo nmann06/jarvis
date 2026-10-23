@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import secrets
 import subprocess
 import sys
@@ -126,8 +127,38 @@ def _device(name):
     raise RuntimeError("No device is running Spotify: open it on your phone or laptop first")
 
 
+# The owner's playlists whose names speech-to-text can't spell, and the real name. "Dunn nuh nun
+# nuh" comes out as "Dun-Nun-Nun-Nun", "Dan Nan Nan Nan", "da na na na", "Dun-na-nun-na"...
+_HEARD_PLAYLISTS = [(re.compile(r"\bd[aou]n*e?h?(?:[\s,-]+n[aou]n*h?){2,}\b", re.I), "Dunn nuh nun nuh")]
+
+
+def fix_playlists(text):
+    """'Play Dan Nan Nan Nan' as heard -> 'Play Dunn nuh nun nuh', the playlist's real name."""
+    for heard, name in _HEARD_PLAYLISTS:
+        text = heard.sub(name, text)
+    return text
+
+
+def _plain(name):
+    words = re.sub(r"[^a-z0-9 ]", " ", name.lower()).split()
+    return " ".join(w for w in words if w not in ("my", "the", "playlist"))
+
+
+def _own_playlist(query):
+    """The owner's saved playlist called query (case, punctuation, 'my' and 'playlist' aside), or
+    None. Spotify's search ranks public playlists first and often misses private ones."""
+    want = _plain(query)
+    page = _call("GET", "/me/playlists", params={"limit": 50})
+    while page:
+        for p in page["items"]:
+            if p and _plain(p["name"]) == want:
+                return p
+        page = page["next"] and _call("GET", page["next"][len(API):])
+    return None
+
+
 @tool("Play something on Spotify: search for it and start the best match. An empty query "
-      "resumes whatever was playing.",
+      "resumes whatever was playing. The owner's own playlists are found by name first.",
       query={"type": "string", "description": "What to play, e.g. 'Mt. Joy', 'Bohemian Rhapsody', "
              "'my workout playlist'; empty to resume"},
       kind={"type": "string", "enum": ["track", "album", "artist", "playlist"],
@@ -140,11 +171,16 @@ def spotify_play(query, kind, device):
     if not query.strip():
         _call("PUT", "/me/player/play", params=params)
         return "Resumed."
-    found = _call("GET", "/search", params={"q": query, "type": kind, "limit": 1})
-    items = [i for i in found[kind + "s"]["items"] if i]
-    if not items:
-        return f"Nothing on Spotify matches {query!r} as a {kind}."
-    item = items[0]
+    query = fix_playlists(query)
+    if any(_plain(query) == _plain(name) for _, name in _HEARD_PLAYLISTS):
+        kind = "playlist"
+    item = _own_playlist(query) if kind == "playlist" else None
+    if not item:
+        found = _call("GET", "/search", params={"q": query, "type": kind, "limit": 1})
+        items = [i for i in found[kind + "s"]["items"] if i]
+        if not items:
+            return f"Nothing on Spotify matches {query!r} as a {kind}."
+        item = items[0]
     body = {"uris": [item["uri"]]} if kind == "track" else {"context_uri": item["uri"]}
     _call("PUT", "/me/player/play", params=params, json=body)
     what = _describe(item) if kind in ("track", "album") else item["name"]

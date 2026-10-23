@@ -495,7 +495,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
         turn.outcome = "nothing heard"
         return False
     log.info("you: %s", text)
-    text = imessage.fix_names(text)
+    text = spotify.fix_playlists(imessage.fix_names(text))
     if is_wake_only(text):
         log.info("just the wake word: listening again")
         turn.outcome = "woken again"
