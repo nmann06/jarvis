@@ -213,11 +213,12 @@ class _Sentences:
 
 
 # Said while Jarvis is talking (or thinking), these cut it off. Vosk listens with only these
-# phrases plus [unk] (anything else), and the whole utterance must be one of them, so Jarvis
-# saying "stop by the office" or "nothing to cancel" (any echo the canceller misses) doesn't count.
+# phrases plus [unk] (anything else). One counts wherever it comes in what Vosk heard: Jarvis's
+# echo runs on into the owner's words ("it yes sir shut up"), so the whole of it rarely is a
+# stop phrase. Echo of Jarvis saying "stop by the office" is caught below.
 STOP_PHRASES = ["stop", "cancel", "stop it", "stop talking", "shut up", "be quiet", "quiet",
                 "enough", "that's enough", "never mind", "forget it", "jarvis stop", "jarvis cancel",
-                "okay stop", "stop stop"]
+                "okay stop", "stop stop", "shut up jarvis", "jarvis shut up"]
 # Not stops, but in the grammar so Vosk has somewhere else to put them: with only the stop
 # phrases to choose from, an echoed "yes sir" came out as "stop".
 _DECOYS = ["sir", "yes sir", "no sir", "of course sir", "certainly sir"]
@@ -239,6 +240,16 @@ def _stop_recognizer():
                                 json.dumps(STOP_PHRASES + _DECOYS + ["[unk]"]))
 
 
+def _stop_in(text):
+    """The stop phrase in what Vosk heard, or None."""
+    words = text.split()
+    for phrase in sorted(STOP_PHRASES, key=len, reverse=True):
+        p = phrase.split()
+        if any(words[i:i + len(p)] == p for i in range(len(words) - len(p) + 1)):
+            return phrase
+    return None
+
+
 def _word_list(text):
     return re.sub(r"[^a-z' ]+", " ", text.lower()).split()
 
@@ -251,6 +262,8 @@ def _is_echo(heard, reply):
     words = _word_list(stt.transcribe(clip.astype(np.float32) / 32768))
     if _STOP_WORDS & set(words):
         return False
+    if "jarvis" in words and "jarvis" not in _word_list(reply):
+        return False  # the owner's "Jarvis, stop": Jarvis doesn't say its own name
     echoed = [w for w in words if w in set(_word_list(reply))]
     if len(words) >= 2 and len(echoed) * 2 > len(words):
         log.info("heard a stop, but Whisper heard %r, my own words: ignored", " ".join(words))
@@ -275,14 +288,15 @@ def _listen_for_stop(mic, stop, done, saying, reply):
                 text = json.loads(rec.Result())["text"]
             else:
                 text = json.loads(rec.PartialResult())["partial"]
-                if text in STOP_PHRASES:
+                if _stop_in(text):
                     # A partial "stop" is usually echo or noise that Vosk drops once it decodes
                     # the whole utterance, so make it decide now (this also starts a new one).
                     text = json.loads(rec.FinalResult())["text"]
-            if text in STOP_PHRASES:
+            if phrase := _stop_in(text):
                 # The canceller lets some echo through, mostly as a reply starts, so Jarvis
-                # saying "stop by the office" could otherwise stop itself.
-                if set(_word_list(saying())) & set(text.split()):
+                # saying "stop by the office" could otherwise stop itself. Only the stop
+                # phrase's own words count here: the "sir" of an echoed "yes sir" is no reason.
+                if set(_word_list(saying())) & set(phrase.split()):
                     log.info("heard %r, but I just said it myself: ignored", text)
                     rec = _stop_recognizer()
                     continue
