@@ -386,6 +386,72 @@ async def test_resume_picker_switches_conversation(home):
         assert app.session_id == "old1"
 
 
+def save_session(home, folder, sid, prompt, extra=()):
+    """A saved conversation started in folder, as Claude Code writes it."""
+    directory = home / "projects" / sessions.project_dir(str(folder)).split("/")[-1]
+    directory.mkdir(parents=True, exist_ok=True)
+    records = [{"type": "user", "cwd": str(folder), "message": {"role": "user", "content": prompt}}, *extra]
+    path = directory / f"{sid}.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in records))
+    return path
+
+
+async def test_left_arrow_lists_every_session_and_resumes_in_its_folder(home, monkeypatch):
+    monkeypatch.chdir(home)  # resuming moves the window (and the process) to the other folder
+    other = home / "other"
+    other.mkdir()
+    for n in range(11):
+        save_session(home, home, f"here{n}", f"chat {n} here")
+    away = save_session(home, other, "away1", "plan the buck converter")
+    os.utime(away, (1, 1))  # the oldest: the list has to scroll to reach it
+    app = make(home)
+    async with app.run_test(size=SIZE) as pilot:
+        await ready(pilot)
+        await pilot.press("left")
+        await until(pilot, lambda: app.dialog is not None)
+        picker = app.dialog
+        assert "12, every folder" in picker.title_text and len(picker.shown) == 9
+        assert "↓ 3 more" in text_of(picker.choice_view.content)
+        await pilot.press("pagedown", "pagedown")  # nine at a time, stopping at the end
+        assert picker.shown[picker.index][0] == "away1" and "↑ 3 more" in text_of(picker.choice_view.content)
+        assert "other" in text_of(picker.choice_view.content)
+        await pilot.press("enter")
+        await until(pilot, lambda: app.dialog is None and app.engine_state == "running"
+                    and [e.text for e in entries(app, UserEntry)] == ["plan the buck converter"])
+        assert app.session_id == "away1" and app.cwd == str(other)
+        assert os.path.realpath(os.getcwd()) == os.path.realpath(other)
+
+
+async def test_left_arrow_in_text_moves_the_cursor(home):
+    app = make(home)
+    async with app.run_test(size=SIZE) as pilot:
+        await ready(pilot)
+        app.prompt.set_text("ab")
+        app.prompt.move_cursor((0, 2))
+        await pilot.press("left", "x")
+        assert app.prompt.text == "axb" and app.dialog is None
+
+
+async def test_tab_title_is_what_the_conversation_is_about(home):
+    path = save_session(home, home, "s1", "what's in notes?")
+    app = make(home, resume="s1")
+    async with app.run_test(size=SIZE) as pilot:
+        await ready(pilot)
+        await until(pilot, lambda: app.tab_title == "Notes About Alpha")
+        assert {"type": "ai-title", "aiTitle": "Notes About Alpha", "sessionId": "s1"} in \
+            [json.loads(line) for line in path.read_text().splitlines()]
+        assert sessions.list_sessions(str(home))[0].title == "Notes About Alpha"
+
+
+async def test_tab_title_uses_a_saved_title(home):
+    save_session(home, home, "s2", "hello there", [{"type": "custom-title", "customTitle": "Greeting", "sessionId": "s2"}])
+    app = make(home, resume="s2")
+    async with app.run_test(size=SIZE) as pilot:
+        await ready(pilot)
+        await until(pilot, lambda: app.tab_title == "Greeting")
+        assert not any("<message>" in " ".join(m.get("argv", [])) for m in sent(home))  # none asked for
+
+
 async def test_stale_menu_does_not_run_a_command(home):
     app = make(home)
     async with app.run_test(size=SIZE) as pilot:

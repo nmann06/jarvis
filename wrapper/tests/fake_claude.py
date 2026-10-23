@@ -276,6 +276,9 @@ def print_mode(prompt):
         with open(os.environ["FAKE_SETTINGS"], "w") as f:
             json.dump(settings, f)
         return
+    if "<message>" in prompt:  # the window asking for a conversation's title
+        print("Notes About Alpha")
+        return
     print(f"ran {prompt}")
 
 

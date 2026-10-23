@@ -304,7 +304,10 @@ The answers are Claude Code's own: the window runs the real `claude` headless (`
 stream-json both ways, on the Pro login), so every tool, MCP server (the Jarvis one included),
 skill, hook, CLAUDE.md, auto mode and saved session is Claude Code's, and conversations are
 shared with it (`/resume` sees both). Claude Code also takes on Jarvis's persona in this window
-(calm, dry, the odd "sir"); `jarvis --plain` leaves it out.
+(calm, dry, the odd "sir"); `jarvis --plain` leaves it out. The terminal tab is titled with what the
+conversation is about: its saved title, or one Haiku writes from the first prompt (headless
+Claude Code doesn't title conversations), saved the way Claude Code saves its own so `/resume`
+shows it in both.
 
 The window draws the rest the way Claude Code does: streamed replies, thinking (one line,
 ctrl+o shows it), tool calls with diffs and folded output, permission dialogs, AskUserQuestion,
@@ -312,7 +315,9 @@ plan approval, the task list, subagents, queued prompts and the context left; th
 always shows plan usage (5-hour, with when it resets, and weekly), the model and effort. The keys are
 Claude Code's: shift+tab switches mode (default, accept edits, plan, auto), esc interrupts,
 `\`+enter or ctrl+j adds a line, ctrl+x s sends now (stopping the turn in progress instead of
-queueing), up and down go through past prompts (shared with Claude Code),
+queueing), up and down go through past prompts (shared with Claude Code), left on an empty
+prompt lists every saved conversation from every folder (resuming one moves the window to its
+folder),
 `/` lists commands, `@` files, `!` runs a shell command, ctrl+c twice quits. Commands Claude Code
 runs headless (`/compact`, `/context`, `/model`, `/effort`, `/clear`, skills) go straight to it.
 Claude Code's interactive menus are rebuilt here: `/usage`, `/status`, `/config` and `/stats`

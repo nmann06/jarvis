@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -34,6 +35,16 @@ from .widgets import (AssistantEntry, Banner, Dialog, DoneEntry, Entry, Footer, 
                       ThinkingEntry, ToolEntry, Transcript, UserEntry, notice, shortcuts)
 
 HISTORY_LIMIT = 300  # saved records redrawn on resume; older ones are left out
+
+# Headless Claude Code doesn't title conversations, so the window asks for one (for the tab
+# and /resume) in a separate, unsaved `claude -p` on Haiku, with no tools.
+TITLE_PROMPT = """Write a title of 2 to 6 words for a conversation that starts with the message \
+below. Reply with the title only.
+
+<message>
+{}
+</message>"""
+TITLE_ARGS = ["--model", "haiku", "--tools", "", "--strict-mcp-config"]
 
 LOCAL_COMMANDS = {
     "help": "Show commands and shortcuts",
@@ -280,6 +291,8 @@ class JarvisApp(App):
         self.limit_note = ""
         self.session_ends = None          # when the 5-hour usage window resets (epoch seconds)
         self.usage = {}                   # % of the plan used: {"five_hour": 13, "seven_day": 28}
+        self.tab_title = None             # the terminal tab's title: what the conversation is about
+        self.titled = None                # the session a title was looked for (once each)
         self.file_index = files.FileIndex(self.cwd)
         self.permission_queue = None
         self.branch = ""
@@ -351,8 +364,11 @@ class JarvisApp(App):
             else:
                 await self.note(f"No conversation {resume} found; starting a new one.", theme.ERROR)
                 resume = None
-        if await self.start_engine(resume=resume) and self.options.prompt:
-            self.submissions.put_nowait((self.options.prompt, False))
+        if await self.start_engine(resume=resume):
+            if resume or self.options.continue_last:
+                self.name_conversation()
+            if self.options.prompt:
+                self.submissions.put_nowait((self.options.prompt, False))
 
     # The engine -----------------------------------------------------------------------------
 
@@ -790,6 +806,7 @@ class JarvisApp(App):
         self.run_worker(self.refresh_context(), group="context")
         if self.engine:
             self.run_worker(self.fetch_usage(self.engine), group="usage", exclusive=True)
+        self.name_conversation()
         if self.commands_pending:
             self.commands_pending = False
             self.run_worker(self.refresh_settings(), group="settings")
@@ -815,6 +832,7 @@ class JarvisApp(App):
         """/clear: a new conversation, same window."""
         await self.clear_transcript()
         self.session_id = msg.get("new_conversation_id") or self.session_id
+        self.set_tab_title(None)
         await self.note("Started a new conversation. The last one stays saved: /resume brings it back.")
 
     async def on_engine_exit(self, msg):
@@ -1175,6 +1193,9 @@ class JarvisApp(App):
         while True:
             text, now = await self.submissions.get()
             try:
+                if callable(text):  # a picker opened by a key (left arrow)
+                    await text()
+                    continue
                 if now:
                     await self.stop_turn()
                 await self.submit(text)
@@ -1387,15 +1408,39 @@ class JarvisApp(App):
                 Text("  ".join(f"/{n}" for n in sorted(engine)), style=theme.DIM)]
         await self.add(NoticeEntry(tools.block(rows)))
 
-    async def pick_session(self):
-        found = sessions.list_sessions(self.cwd)
+    async def pick_session(self, everywhere=False):
+        """A conversation to resume: from this folder, or (everywhere) from any folder."""
+        if everywhere:
+            found = await asyncio.to_thread(sessions.list_all_sessions)
+        else:
+            found = sessions.list_sessions(self.cwd)
         if not found:
-            await self.note("No earlier conversations in this folder.")
+            await self.note("No earlier conversations." if everywhere else "No earlier conversations in this folder.")
             return None
-        items = [(s.id, tools.one_line(s.title, 70),
-                  f"{sessions.time_ago(s.modified)} · {s.prompts} prompt{'s' if s.prompts != 1 else ''}"
-                  + (f" · ⎇ {s.branch}" if s.branch else "")) for s in found]
-        return await self.show_dialog(Picker("Resume a conversation", items))
+
+        def about(s):
+            parts = [sessions.time_ago(s.modified), f"{s.prompts} prompt{'s' if s.prompts != 1 else ''}"]
+            if everywhere and s.cwd:
+                parts.append(tools.short_path(s.cwd, None))
+            if s.branch:
+                parts.append(f"⎇ {s.branch}")
+            return " · ".join(parts)
+
+        items = [(s.id, tools.one_line(s.title, 70), about(s)) for s in found]
+        title = f"Resume a conversation ({len(found)}, every folder)" if everywhere else "Resume a conversation"
+        return await self.show_dialog(Picker(title, items))
+
+    def show_all_sessions(self):
+        """Left arrow on an empty prompt: every saved conversation, from every folder."""
+        if self.dialog is not None or self.menu.display or self.prompt.text:
+            return False
+        self.submissions.put_nowait((self.cmd_all_sessions, False))
+        return True
+
+    async def cmd_all_sessions(self):
+        session_id = await self.pick_session(everywhere=True)
+        if session_id:
+            await self.switch_session(session_id)
 
     async def cmd_resume(self, args):
         session_id = args or await self.pick_session()
@@ -1409,8 +1454,65 @@ class JarvisApp(App):
             return
         await self.stop_engine()
         await self.clear_transcript()
+        cwd = sessions.summarize(path)[4]
+        if cwd and cwd != self.cwd and os.path.isdir(cwd):
+            self.change_dir(cwd)  # Claude Code resumes a conversation from the folder it ran in
+            await self.note(f"Now in {tools.short_path(cwd, None)}")
         await self.show_history(path)
-        await self.start_engine(resume=os.path.basename(path)[:-6])
+        self.set_tab_title(None)
+        if await self.start_engine(resume=os.path.basename(path)[:-6]):
+            self.name_conversation()
+
+    def change_dir(self, cwd):
+        """Move the window to another folder: a conversation from there is being resumed."""
+        self.cwd = cwd
+        os.chdir(cwd)
+        self.file_index = files.FileIndex(cwd)
+        self.run_worker(self.file_index.load(), group="files")
+        self.branch = git_branch(cwd)
+        self.banner.set_info(cwd=tools.short_path(cwd, None), branch=self.branch)
+        self.history = sessions.read_history(cwd)
+        self.history_index = -1
+
+    def name_conversation(self):
+        """Put what this conversation is about in the terminal tab, once per conversation."""
+        if self.session_id and self.titled != self.session_id:
+            self.titled = self.session_id
+            self.run_worker(self.find_title(self.session_id), group="title")
+
+    async def find_title(self, session_id):
+        path = sessions.find_session(self.cwd, session_id)
+        if not path:
+            return
+        title = await asyncio.to_thread(sessions.saved_title, path)
+        if not title:
+            first = (await asyncio.to_thread(sessions.summarize, path))[0]
+            if first == "(no prompt)":
+                self.titled = None  # nothing to go on yet: try again after the next turn
+                return
+            try:
+                answer = await self.claude_print(TITLE_PROMPT.format(first[:2000]), extra=TITLE_ARGS)
+            except EngineError:
+                return
+            title = tools.one_line(answer.strip().strip('"\'*#').rstrip("."), 60)
+            if not title or session_id != self.session_id:
+                return
+            try:
+                await asyncio.to_thread(sessions.add_title, path, session_id, title)
+            except OSError:
+                pass
+        if session_id == self.session_id:
+            self.set_tab_title(title)
+
+    def set_tab_title(self, title):
+        """The terminal tab's title: the conversation's, or Jarvis (None) for a new one."""
+        self.tab_title = title
+        if title is None:
+            self.titled = None
+        clean = re.sub(r"[\x00-\x1f\x7f]", "", title or "Jarvis")
+        driver = getattr(self, "_driver", None)
+        if driver is not None and sys.stdout.isatty():
+            driver.write(f"\033]0;{clean}\007")
 
     async def show_history(self, path):
         messages = sessions.load_conversation(path)
@@ -1459,10 +1561,10 @@ class JarvisApp(App):
 
     # Data for the menus (panels.py) -------------------------------------------------------------
 
-    async def claude_print(self, prompt, timeout=60):
+    async def claude_print(self, prompt, timeout=60, extra=()):
         """Run one command in a separate, unsaved Claude Code (`claude -p ... --no-session-
         persistence`), so it never lands in the conversation; returns what it printed."""
-        argv = claude_command(self.options.engine_command) + ["-p", prompt, "--no-session-persistence"]
+        argv = claude_command(self.options.engine_command) + ["-p", prompt, "--no-session-persistence", *extra]
         proc = await asyncio.create_subprocess_exec(
             *argv, cwd=self.cwd, env=clean_environment(), stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -1754,6 +1856,10 @@ class JarvisApp(App):
         self.transcript.scroll_end(animate=False)
 
     def action_page(self, direction):
+        if isinstance(self.dialog, Picker):
+            self.dialog.dialog_key("pageup" if direction < 0 else "pagedown")
+            self.dialog.redraw()
+            return
         if direction < 0:
             self.transcript.scroll_page_up()
         else:
