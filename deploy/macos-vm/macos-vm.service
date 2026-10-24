@@ -1,15 +1,15 @@
-# Optional: start the macOS VM at boot (Jarvis's iMessage/SMS bridge). To use it:
+# Starts the macOS VM at boot (Jarvis's iMessage/SMS bridge). Linger is on, so no login needed.
 #   ln -s ~/jarvis/deploy/macos-vm/macos-vm.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload && systemctl --user enable --now macos-vm
-# (stop the hand-started VM first: python3 ~/jarvis/deploy/macos-vm/vmctl.py hmp system_powerdown)
 [Unit]
 Description=macOS VM for Jarvis's iMessage/SMS bridge (~/vm/macos-monterey)
 
 [Service]
 ExecStart=%h/jarvis/deploy/macos-vm/run.sh
-# Ask macOS to shut down cleanly, as the power button would.
-ExecStop=/bin/sh -c 'echo system_powerdown | socat - unix-connect:%h/vm/macos-monterey/monitor.sock; while kill -0 $MAINPID 2>/dev/null; do sleep 1; done'
-TimeoutStopSec=90
+# Shut macOS down over SSH; the ACPI power button is ignored while the screen is locked, so it
+# is only the fallback (e.g. SSH not up yet). Just after boot macOS is slow (1 vCPU), hence 45 s.
+ExecStop=/bin/sh -c 'timeout 45 ssh -o BatchMode=yes -o ConnectTimeout=5 jarvis-mac "osascript -e \'tell application \\"System Events\\" to shut down\'" || echo system_powerdown | socat - unix-connect:%h/vm/macos-monterey/monitor.sock; while kill -0 $MAINPID 2>/dev/null; do sleep 1; done'
+TimeoutStopSec=150
 Restart=on-failure
 RestartSec=30
 Nice=5
