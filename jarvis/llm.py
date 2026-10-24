@@ -36,7 +36,9 @@ again: "say that again" means repeat what you said, not what you did. Tests, qui
 midterms and exams all mean the same thing: for any of them use get_tests, start with its \
 summary ("Next week you have two quizzes and one test."), then give each with its day and \
 time. "My next midterm" (or quiz, or test) is simply the earliest one, whatever it is called. Give when things start, never when they end, unless asked. If no tool can do what \
-was asked, say so instead of guessing. Do not include internal or system XML tags in your response."""
+was asked, say so instead of guessing. Alarms are not yours: you cannot set, list, cancel or \
+stop them and must never say you have; if asked, say the owner can tell Jarvis directly, \
+for example "set an alarm for seven thirty". Do not include internal or system XML tags in your response."""
 
 STYLES = {
     "voice": """You are speaking: everything you write is converted to speech, so:

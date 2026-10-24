@@ -33,13 +33,18 @@ class WakeWord:
         while True:
             if interrupt and interrupt():
                 return None
-            block = mic.read()
-            self.preroll.append(block)
-            score = self._model.predict(block)[MODEL]
-            if score >= config.WAKE_THRESHOLD:
-                # Clear the model's rolling buffer so one "Hey Jarvis" can't trigger twice.
-                self._model.reset()
+            if (score := self.heard(mic.read())) is not None:
                 return score
+
+    def heard(self, block):
+        """Feed one block; the detection score if that completed a "Hey Jarvis", else None."""
+        self.preroll.append(block)
+        score = self._model.predict(block)[MODEL]
+        if score >= config.WAKE_THRESHOLD:
+            # Clear the model's rolling buffer so one "Hey Jarvis" can't trigger twice.
+            self._model.reset()
+            return score
+        return None
 
 
 if __name__ == "__main__":
