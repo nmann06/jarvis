@@ -138,7 +138,7 @@ used, plus the last 8 replies you rewrote as examples.
 
 account.apple.com -> Sign-In and Security -> App-Specific Passwords -> create one, then put your
 Apple ID email and that password in `.env` as `ICLOUD_USER` / `ICLOUD_APP_PASSWORD`. New events go
-in `ICLOUD_CALENDAR` (default Home) unless Claude picks a better fit (Work, Classes, ...).
+in `ICLOUD_CALENDAR` (default Jarvis) unless Claude picks a better fit (Work, Classes, ...).
 
 ### Google setup (Gmail, Sheets, Drive notes)
 
@@ -374,9 +374,10 @@ to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 
 Done: TTS, STT (GPU), Claude with tools, wake word + end-of-speech detection, full pipeline,
 systemd service, Discord bot, Apple Calendar, Gmail, the job-search sheet, Trello, OnQ and Smith
-Learning, briefings and reminders, Claude Code alerts, the MCP server, learning mode, project
-mode. Ready but waiting for your sign-in: Spotify, OneDrive, iMessage/SMS (the Mac VM). Ideas
-for the Windows laptop (seeing its screen, editing and running work there): docs/other-laptop.md.
+Learning, briefings and reminders, intake (todos and events from OnQ, email and texts), Claude
+Code alerts, the MCP server, learning mode, project mode. Ready but waiting for your sign-in:
+Spotify, OneDrive, iMessage/SMS (the Mac VM). Ideas for the Windows laptop (seeing its screen,
+editing and running work there): docs/other-laptop.md.
 
 ## Project mode
 
@@ -438,6 +439,32 @@ understand gets a fixed reply. Claude's system prompt tells it alarms aren't its
   (Jarvis not running) is reported in Discord instead.
 - `python -m jarvis.alarms "set an alarm for 7:30 tomorrow"` shows what a phrase parses to;
   `python -m jarvis.alarms --play` plays each sound.
+
+## Intake
+
+`jarvis/intake.py`, run every 20 minutes from the proactive loop, adds todos and calendar events
+by itself. It gathers what's new since it last looked: OnQ and Smith Learning work due in the
+next 3 weeks that isn't submitted, new course announcements, inbox email from the last two days
+(promotions, social and forums left out) and texts from the Mac VM once they're 30 minutes old
+(so a quick reply from you counts). Claude reads that next to the Trello cards, the next 60 days
+of calendar (Classes left out) and what intake added before, and picks:
+
+- todos, added to the `todo` list on the main Trello board with a due date if there is one:
+  coursework due, forms, things you agreed to do, and "Respond to <name>" for messages that
+  need a real answer;
+- events, added to Apple Calendar: interviews, appointments, plans you agreed to and in-person
+  tests (those go in Midterms, so the test reminders pick them up). Coursework stays on Trello,
+  so it isn't reminded twice.
+
+Anything already on Trello (any list) or the calendar is skipped, and so is anything intake
+added in the last 60 days, so removing a wrong card or event keeps it gone. Each run's
+additions are posted in #jarvis in one message, with where each came from. At most 8 per run;
+calendars are limited to Jarvis (the default), Work, Midterms, Queen's, Ultimate and Family.
+Email and texts are handed to Claude as untrusted content. What was already read is kept under
+`intake` in `data/proactive.json`.
+
+`python -m jarvis.proactive intake` shows how many new items each source has and what it would
+add, without adding anything.
 
 ## Tools
 
