@@ -76,6 +76,13 @@ THINKING_SOUND = os.getenv("THINKING_SOUND", "on") == "on"  # soft blips while w
 # The first SAY_PLEASE_TESTS times (counted in data/say-please-tests) it always does, to try it.
 SAY_PLEASE_RATE = float(os.getenv("SAY_PLEASE_RATE", "0.05"))
 SAY_PLEASE_TESTS = int(os.getenv("SAY_PLEASE_TESTS", "2"))
+# Alarms (jarvis/alarms.py): handled without Claude.
+ALARM_SOUND = os.getenv("ALARM_SOUND", "classic")  # default sound until the owner picks one
+ALARM_RING_MINUTES = int(os.getenv("ALARM_RING_MINUTES", "15"))  # gives up after this long
+ALARM_RAMP_MINUTES = float(os.getenv("ALARM_RAMP_MINUTES", "15"))  # quiet to full over this long
+ALARM_START_VOLUME = float(os.getenv("ALARM_START_VOLUME", "10"))  # percent of full, at first
+ALARM_MIN_VOLUME = int(os.getenv("ALARM_MIN_VOLUME", "60"))  # speaker raised to this if lower
+ALARM_SNOOZE_MINUTES = int(os.getenv("ALARM_SNOOZE_MINUTES", "9"))
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")  # "cuda" or "cpu"
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))

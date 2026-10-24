@@ -413,6 +413,32 @@ Claude Code session per project.
 It shares the Pro plan's usage limits with your own Claude Code use (Sonnet by default,
 `PROJECT_MODEL`). Needs `MCP_TOKEN` set for the Jarvis tools (it is).
 
+## Alarms
+
+Handled entirely by `jarvis/alarms.py`, never by Claude, so it can't claim an alarm is set when
+it isn't: requests that mention an alarm (or "wake me ...") are matched with regexes in the
+voice loop and the Discord bot before Claude sees them, and anything about alarms it doesn't
+understand gets a fixed reply. Claude's system prompt tells it alarms aren't its job.
+
+- "Set an alarm for 7:30" / "wake me up at six tomorrow" / "alarm in 20 minutes" / "set an alarm
+  for 7 on Monday with birds". A bare "7" is whichever of 7 am or 7 pm comes first; the reply
+  says "tomorrow" or "tonight". "Set an alarm" alone asks for the time.
+- "What alarms do I have?", "cancel my 7:30 alarm", "cancel all alarms".
+- Sounds: classic, digital, chimes, marimba, birds (synthesized, no files), or random. "What
+  alarm sounds are there?", "play the birds alarm sound", "change my alarm sound to chimes".
+- Ringing: starts at `ALARM_START_VOLUME` (10%) and climbs evenly in decibels to full over
+  `ALARM_RAMP_MINUTES` (15), for at most `ALARM_RING_MINUTES` (15), then posts in Discord that
+  nobody turned it off. The speaker is unmuted and raised to at least `ALARM_MIN_VOLUME` (60%)
+  while it rings. No wake word needed to stop it: "stop", "turn it off", "I'm up", "snooze"
+  (`ALARM_SNOOZE_MINUTES`, 9). Vosk listens for those and Whisper confirms the word, so a
+  beep can't switch it off; if Whisper can't make it out, a second "stop" within 20 s counts.
+  "Hey Jarvis, ..." turns the alarm right down while you talk. In Discord, "stop" or "snooze"
+  works too.
+- Kept in `data/alarms.json`, so they survive a restart; one missed by more than 15 minutes
+  (Jarvis not running) is reported in Discord instead.
+- `python -m jarvis.alarms "set an alarm for 7:30 tomorrow"` shows what a phrase parses to;
+  `python -m jarvis.alarms --play` plays each sound.
+
 ## Tools
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never

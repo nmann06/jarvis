@@ -3,6 +3,7 @@
 Started by jarvis.main. Each turn logs where its time went (jarvis.latency).
 """
 
+import difflib
 import json
 import logging
 import queue
@@ -16,7 +17,7 @@ from datetime import datetime
 import numpy as np
 import sounddevice as sd
 
-from jarvis import audio, config, latency, learn, llm, notify, project, stt, tools, tts
+from jarvis import alarms, audio, config, latency, learn, llm, notify, project, stt, tools, tts
 from jarvis.tools import imessage, spotify
 from jarvis.tools.clock import TZ
 from jarvis.wakeword import WakeWord
@@ -235,37 +236,38 @@ ECHO_CHECK_PAD = 0.1
 _STOP_WORDS = {"stop", "cancel", "shut", "quiet", "enough", "forget", "nevermind"}
 
 
-def _stop_recognizer():
+def _stop_recognizer(phrases=None):
     global _vosk
     import vosk
     if _vosk is None:
         vosk.SetLogLevel(-1)
         _vosk = vosk.Model(str(config.VOSK_MODEL))
-    rec = vosk.KaldiRecognizer(_vosk, audio.SAMPLE_RATE,
-                               json.dumps(STOP_PHRASES + _DECOYS + ["[unk]"]))
+    phrases = phrases or STOP_PHRASES + _DECOYS
+    rec = vosk.KaldiRecognizer(_vosk, audio.SAMPLE_RATE, json.dumps(phrases + ["[unk]"]))
     rec.SetWords(True)  # word times, so Whisper can check just the stop phrase
     return rec
 
 
-def _stop_in(text):
+def _stop_in(text, phrases=STOP_PHRASES):
     """The stop phrase in what Vosk heard, or None."""
     words = text.split()
-    for phrase in sorted(STOP_PHRASES, key=len, reverse=True):
+    for phrase in sorted(phrases, key=len, reverse=True):
         p = phrase.split()
         if any(words[i:i + len(p)] == p for i in range(len(words) - len(p) + 1)):
             return phrase
     return None
 
 
-def _stop_clip(heard, rec_start, result, phrase):
+def _stop_clip(heard, rec_start, result, phrase, pad=ECHO_CHECK_PAD):
     """The audio of phrase in heard, from a Vosk result with word times (relative to
-    rec_start, the samples heard before that recognizer started)."""
+    rec_start, the samples heard before that recognizer started), with pad seconds either
+    side."""
     words, p = result.get("result", []), phrase.split()
     audio_heard = np.concatenate(heard)
     for i in range(len(words) - len(p) + 1):
         if [w["word"] for w in words[i:i + len(p)]] == p:
-            start = rec_start + int((words[i]["start"] - ECHO_CHECK_PAD) * audio.SAMPLE_RATE)
-            end = rec_start + int((words[i + len(p) - 1]["end"] + ECHO_CHECK_PAD)
+            start = rec_start + int((words[i]["start"] - pad) * audio.SAMPLE_RATE)
+            end = rec_start + int((words[i + len(p) - 1]["end"] + pad)
                                   * audio.SAMPLE_RATE)
             return audio_heard[max(start, 0):end]
     return audio_heard[rec_start:]  # no word times: all this recognizer heard
@@ -536,6 +538,18 @@ def _answer(mic, brain, utterance, follow_up, turn):
             turn.outcome = "still waiting for please"
             return True
         # else: woken for something new (or asked enough times): the request is dropped
+    # Alarms never go to Claude (jarvis.alarms): set, listed and cancelled here, even in the
+    # follow-up window, since only Jarvis is asked about alarms.
+    if (reply := alarms.local_reply(text, "voice")) is not None:
+        log.info("alarm (local): %s", reply)
+        with _speaker:
+            _, stopped = _speak(mic, [reply], timing=turn)
+            if not stopped:
+                alarms.after_reply()  # a sound preview, if asked for
+        mic.clear()
+        _last_reply = turn.reply = reply
+        turn.outcome = "stopped" if stopped else "alarm (local)"
+        return not stopped
     if follow_up and _ADDRESSED.match(text):
         follow_up = False  # "Jarvis, ..." is meant for Jarvis
     if follow_up and _last_reply and "?" in _last_reply:
@@ -659,6 +673,85 @@ def _speak_updates(mic):
     mic.clear()
 
 
+# While an alarm rings, any of these (no wake word needed) turns it off, or snoozes it.
+ALARM_OFF_PHRASES = ["stop", "stop it", "stop the alarm", "alarm off", "turn it off",
+                     "turn off the alarm", "turn the alarm off", "off", "i'm up", "i'm awake",
+                     "okay i'm up", "alright i'm up", "enough", "shut up", "be quiet", "quiet",
+                     "cancel", "dismiss", "snooze", "jarvis stop", "jarvis snooze",
+                     "jarvis turn it off"]
+_ALARM_DECOYS = ["okay", "alright", "jarvis", "sir", "please"]
+# Whisper must hear one of these (or near enough: "Stop." over the beeps came out as "sop")
+# where Vosk heard the phrase: Vosk, choosing only between these phrases, could turn a beep
+# into "off". A second Vosk hit within this long counts anyway, in case Whisper can't make the
+# owner out over the alarm.
+_ALARM_OFF_WORDS = {"stop", "off", "up", "awake", "enough", "shut", "quiet", "cancel",
+                    "dismiss", "snooze"}
+ALARM_RECHECK_SECONDS = 20
+ALARM_CHECK_PAD = 0.3
+
+
+def _alarm_mode(mic, wake, brain):
+    """An alarm is ringing: listen for "stop" or "snooze" (Vosk, confirmed by Whisper), and for
+    "Hey Jarvis, ..." as usual. Returns once the alarm is off."""
+    phrases = ALARM_OFF_PHRASES + _ALARM_DECOYS
+    rec, heard, unconfirmed = _stop_recognizer(phrases), [], 0.0
+    max_blocks = int(30 * audio.SAMPLE_RATE / audio.BLOCK)
+    mic.clear()
+    log.info("alarm ringing: listening for stop")
+    while alarms.ringing():
+        block = mic.read(timeout=0.1)
+        if block is None:
+            continue
+        heard.append(block)
+        if wake.heard(block) is not None:
+            _alarm_request(mic, wake, brain)
+            rec, heard = _stop_recognizer(phrases), []
+            continue
+        if rec.AcceptWaveform(block.tobytes()):
+            result = json.loads(rec.Result())
+        else:
+            result = {"text": json.loads(rec.PartialResult())["partial"]}
+            if _stop_in(result["text"], ALARM_OFF_PHRASES):
+                result = json.loads(rec.FinalResult())
+        phrase = _stop_in(result["text"], ALARM_OFF_PHRASES)
+        if phrase is None:
+            if len(heard) > max_blocks:  # keep only the current stretch of audio
+                rec, heard = _stop_recognizer(phrases), []
+            continue
+        clip = _stop_clip(heard, 0, result, phrase, pad=ALARM_CHECK_PAD)
+        words = set(_word_list(stt.transcribe(clip.astype(np.float32) / 32768)))
+        again = time.monotonic() - unconfirmed < ALARM_RECHECK_SECONDS
+        rec, heard = _stop_recognizer(phrases), []
+        said = any(difflib.get_close_matches(w, _ALARM_OFF_WORDS, n=1, cutoff=0.75)
+                   for w in words)
+        if not (said or again):
+            log.info("alarm: Vosk heard %r, Whisper heard %r: not sure yet", phrase,
+                     " ".join(sorted(words)))
+            unconfirmed = time.monotonic()
+            continue
+        log.info("alarm: heard %r (Whisper: %r)", phrase, " ".join(sorted(words)))
+        reply = alarms.local_reply("snooze" if "snooze" in phrase else "stop", "voice")
+        if reply:
+            with _speaker:
+                tts.speak_all([reply])
+    mic.clear()
+
+
+def _alarm_request(mic, wake, brain):
+    """ "Hey Jarvis, ..." while the alarm rings: the alarm is turned right down while the owner
+    talks and Jarvis answers. "Turn it off" is answered locally (jarvis.alarms); anything else
+    goes on as usual, and the alarm comes back up afterwards."""
+    alarms.hush(True)
+    try:
+        play(CHIME)
+        utterance = audio.record_utterance(mic, stt.transcribe, preroll=wake.preroll)
+        if utterance is not None:
+            handle(mic, brain, utterance)
+    finally:
+        alarms.hush(False)
+        mic.clear()
+
+
 def run():
     wake, brain = WakeWord(), llm.Brain("voice")
     tools.warm_up()
@@ -670,7 +763,11 @@ def run():
     with audio.Mic() as mic:
         log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)", config.WAKE_THRESHOLD)
         while True:
-            score = wake.wait(mic, interrupt=lambda: not project.speech.empty())
+            score = wake.wait(mic, interrupt=lambda: (alarms.ringing()
+                                                      or not project.speech.empty()))
+            if score is None and alarms.ringing():
+                _alarm_mode(mic, wake, brain)
+                continue
             if score is None:  # a project has something to say
                 _speak_updates(mic)
                 continue

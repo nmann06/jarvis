@@ -11,7 +11,7 @@ import logging
 
 import discord
 
-from jarvis import config, llm, notify, project
+from jarvis import alarms, config, llm, notify, project
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +103,13 @@ class JarvisBot(discord.Client):
             await message.add_reaction("⏳" if queued else "📨")
             return
         log.info("discord you: %s", text)
+        loop = asyncio.get_running_loop()
+        # Alarms are handled without Claude (jarvis.alarms), as by voice.
+        if (reply := await loop.run_in_executor(None, alarms.local_reply, text, "discord")):
+            log.info("discord jarvis (alarm, local): %s", reply)
+            await message.channel.send(reply)
+            await loop.run_in_executor(None, alarms.after_reply)
+            return
         async with message.channel.typing():
             # Brain.ask blocks (network + tools), so run it off the event loop.
             reply = await asyncio.get_running_loop().run_in_executor(None, self.brain.ask, text)
