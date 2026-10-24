@@ -6,6 +6,8 @@
 - OnQ reminders: assignments not yet submitted and OnQ quizzes, 2 days and 1 day before
   (OnQ calendar events are left out: tests go in the Midterms calendar instead);
 - important-email alerts: new unread mail that Claude judges worth a ping;
+- intake (jarvis/intake.py): todos and calendar events picked out of OnQ, email and texts,
+  added to Trello and Apple Calendar by themselves;
 - power alerts: the laptop went on battery, is running low, or was plugged back in.
 
 What was already sent is kept in data/proactive.json, so a restart doesn't repeat anything.
@@ -24,7 +26,7 @@ from pathlib import Path
 
 import anthropic
 
-from jarvis import config, notify
+from jarvis import config, intake, notify
 from jarvis.tools import gmail, icloud_calendar, onq, sheets, trello, weather
 from jarvis.tools.clock import TZ
 
@@ -373,7 +375,8 @@ def run():
                                    ("soloist", check_soloist, SOLOIST_EVERY),
                                    ("reminders", check_reminders, REMINDER_EVERY),
                                    ("onq", check_onq, ONQ_EVERY),
-                                   ("email", check_email, EMAIL_EVERY)):
+                                   ("email", check_email, EMAIL_EVERY),
+                                   ("intake", intake.check, intake.EVERY)):
             if time.monotonic() - last.get(name, 0.0) < every:
                 continue
             last[name] = time.monotonic()
@@ -390,7 +393,7 @@ def start():
 
 
 if __name__ == "__main__":
-    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|email]
+    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|email|intake]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
     import sys
     now = datetime.now(TZ)
@@ -415,3 +418,7 @@ if __name__ == "__main__":
         print(_claude(EMAIL_JUDGE.format(contacts=_contact_names()), listing, 600) if emails else "No unread email.")
         for e in emails:
             print(e["id"], "|", e["from"], "|", e["subject"])
+    elif what == "intake":
+        new, picks = intake.preview(_load(), now)
+        print("New:", json.dumps(new))
+        print(json.dumps(picks, indent=1, ensure_ascii=False) if picks else "Nothing new.")

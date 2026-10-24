@@ -111,14 +111,14 @@ def _is_lab(e):
 
 
 @tool("Add an event to the owner's Apple Calendar. Can't change or delete existing events. "
-      "Calendars: Home (default), Work, Classes, Midterms, Queen's, Ultimate, Family.",
+      "Calendars: Jarvis (default), Home, Work, Classes, Midterms, Queen's, Ultimate, Family.",
       title={"type": "string"},
       start={"type": "string", "description": "Local start, YYYY-MM-DDTHH:MM, or YYYY-MM-DD for all day"},
       duration_minutes={"type": "integer", "minimum": 1,
                         "description": "Length; 60 if not said. Ignored for all-day events"},
       location={"type": "string", "description": "Where, or empty"},
       calendar={"type": "string", "description": "Which calendar; empty for the default"})
-def add_event(title, start, duration_minutes, location, calendar):
+def add_event(title, start, duration_minutes, location, calendar, record=True):
     if "T" in start:
         begin = datetime.fromisoformat(start).replace(tzinfo=TZ)
         finish = begin + timedelta(minutes=duration_minutes)
@@ -138,5 +138,6 @@ def add_event(title, start, duration_minutes, location, calendar):
             fields["location"] = location
         cal.add_event(**fields)
     summary = _describe(begin, finish, title, location)
-    notify.record(f"📅 Added to {name}: {summary}")
+    if record:  # intake posts its own summary instead
+        notify.record(f"📅 Added to {name}: {summary}")
     return f"Added to {name}: {summary}"

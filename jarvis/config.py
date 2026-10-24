@@ -47,7 +47,7 @@ MCP_PORT = int(os.getenv("MCP_PORT", "8766"))
 
 ICLOUD_USER =os.getenv("ICLOUD_USER", "")  # Apple ID email
 ICLOUD_APP_PASSWORD = os.getenv("ICLOUD_APP_PASSWORD", "")  # app-specific password, not the real one
-ICLOUD_CALENDAR = os.getenv("ICLOUD_CALENDAR", "Home")  # default calendar for new events
+ICLOUD_CALENDAR = os.getenv("ICLOUD_CALENDAR", "Jarvis")  # default calendar for new events
 BRIEFING_HOUR = int(os.getenv("BRIEFING_HOUR", "8"))  # morning briefing posted in #jarvis
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")  # job-search sheet, from its URL
 TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
