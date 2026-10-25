@@ -239,31 +239,47 @@ def spotify_devices(move_to):
              "volume": d.get("volume_percent")} for d in devices] or "No devices have Spotify open."
 
 
-DUCK_VOLUME = "20%"
+DUCK_LEVEL = 0.2  # ducked music plays at this fraction of the volume it had
 # The speaker's PipeWire stream: Soloist's is node "spotify" (it sets no process binary);
 # spotifyd's had binary "spotifyd".
 _SPEAKER_STREAM = {"node.name": "spotify", "application.process.binary": "spotifyd"}
+# Stream volumes from before ducking, kept on disk so a restart after a crash can put them back.
+DUCK_FILE = config.ROOT / "data" / "spotify-duck.json"
 _ducks = 0
 _duck_lock = threading.Lock()
 
 
+def _set_stream_volume(index, raw):
+    subprocess.run(["pactl", "set-sink-input-volume", str(index), *map(str, raw)], timeout=2)
+
+
 def duck(on):
     """Turn the music on Jarvis's speaker down while Jarvis listens and talks (on=True), and back
-    up after (on=False). Calls nest: the music comes back up when the last one ends. Done on
-    the speaker's PipeWire stream, so it is instant and leaves Spotify's own volume alone."""
+    to where it was after (on=False). Calls nest: the music comes back up when the last one ends.
+    Done on the speaker's PipeWire stream, so it is instant. Soloist keeps its Spotify volume in
+    that stream, so it is saved and put back exactly, never just set to 100%."""
     global _ducks
     with _duck_lock:
         _ducks = _ducks + 1 if on else max(_ducks - 1, 0)
         if _ducks > (1 if on else 0):
             return
         try:
-            streams = json.loads(subprocess.run(["pactl", "-f", "json", "list", "sink-inputs"],
-                                                capture_output=True, text=True, timeout=2).stdout)
-            for s in streams:
-                if any(s["properties"].get(k) == v for k, v in _SPEAKER_STREAM.items()):
-                    subprocess.run(["pactl", "set-sink-input-volume", str(s["index"]),
-                                    DUCK_VOLUME if on else "100%"], timeout=2)
-        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            if on:
+                streams = json.loads(subprocess.run(["pactl", "-f", "json", "list", "sink-inputs"],
+                                                    capture_output=True, text=True, timeout=2).stdout)
+                saved = {}
+                for s in streams:
+                    if any(s["properties"].get(k) == v for k, v in _SPEAKER_STREAM.items()):
+                        raw = [c["value"] for c in s["volume"].values()]
+                        saved[str(s["index"])] = raw
+                        _set_stream_volume(s["index"], [int(v * DUCK_LEVEL) for v in raw])
+                DUCK_FILE.parent.mkdir(exist_ok=True)
+                DUCK_FILE.write_text(json.dumps(saved))
+            elif DUCK_FILE.exists():
+                for index, raw in json.loads(DUCK_FILE.read_text()).items():
+                    _set_stream_volume(index, raw)  # a stream that has since gone just fails
+                DUCK_FILE.unlink()
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
             log.warning("couldn't %s the music: %s", "lower" if on else "raise", e)
 
 
