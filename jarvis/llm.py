@@ -72,14 +72,13 @@ links) rather than a spoken summary. Skip the persona flourishes.""",
 # Prompt caching. An hour rather than the default 5 minutes: talking to Jarvis comes in bursts
 # often more than 5 minutes apart, and on Haiku the dearer cache writes cost next to nothing.
 CACHE = {"type": "ephemeral", "ttl": "1h"}
-# History is trimmed back to HISTORY_TURNS only once it is this many turns over, or as a new
-# voice conversation starts (prewarm). Dropping the oldest turn every time would change the
-# start of the conversation on each request, so none of it could be read from the cache (a
-# 20k-token conversation then takes about 0.25 s longer to answer).
-HISTORY_SLACK = 5
-MAX_TOOL_ROUNDS = 5  # guard against a tool loop that never ends
-TOOL_MAX_TOKENS = 8000  # each request's max_tokens: room for a long tool call (a note, an email draft)
-CHARS_PER_TOKEN = 4  # about, in English: the reply limit (MAX_TOKENS) is counted in characters
+# The conversation is kept whole until it passes HISTORY_CHARS (near the context window); then
+# the oldest turns are dropped down to this share of it at once. Dropping one turn every time
+# would change the start of the conversation on each request, so none of it could be read from
+# the cache (a 20k-token conversation then takes about 0.25 s longer to answer).
+HISTORY_KEEP = 0.75
+MAX_TOOL_ROUNDS = 25  # guard against a tool loop that never ends
+MAX_OUTPUT_TOKENS = 32000  # each request's max_tokens: high enough that no reply is cut off
 
 IGNORE = "IGNORE"
 FOLLOW_UP_NOTE = f"""This was picked up in the few seconds after your last reply, without the wake \
@@ -110,20 +109,18 @@ class Brain:
         # conversation reads that prefix back.
         self._system, self._lessons = None, False
         self._refresh_system()
-        self._max_tokens = config.MAX_TOKENS if self.style == "voice" else config.MAX_TOKENS_DISCORD
         # Idle connections are normally dropped after 5 s; keep them for a minute, so the one
         # prewarm() opens is still there when the owner finishes talking.
         self._client = anthropic.Anthropic(http_client=anthropic.DefaultHttpxClient(
             limits=httpx2.Limits(max_connections=1000, max_keepalive_connections=100,
                                  keepalive_expiry=60)))
-        # Finished turns, each a list of messages, oldest dropped first (see HISTORY_SLACK).
+        # Finished turns, each a list of messages, oldest dropped first (see HISTORY_KEEP).
         # With thinking off they keep their tool calls and results, so Claude can see what it
         # already did (otherwise it may redo an action, like adding the same event twice). With
         # thinking on, only the question and final reply are kept: thinking blocks are tied to
         # the exact history, so replaying them after trimming old turns could be rejected.
         self._history = []
         self._lock = threading.Lock()  # prewarm() trims it from another thread
-        self._max_chars = self._max_tokens * CHARS_PER_TOKEN
 
     def _refresh_system(self):
         """The persona, reply style and lessons from the owner's feedback (jarvis.learn), rebuilt
@@ -140,17 +137,27 @@ class Brain:
         with self._lock:
             return [m for turn in self._history for m in turn]
 
-    def _trim(self, over=0):
-        """Drop the oldest turns if there are more than HISTORY_TURNS + over."""
+    def _trim(self):
+        """If the conversation is past HISTORY_CHARS, drop the oldest turns down to HISTORY_KEEP
+        of it (the latest turn always stays)."""
         with self._lock:
-            if len(self._history) > config.HISTORY_TURNS + over:
-                del self._history[:len(self._history) - config.HISTORY_TURNS]
+            sizes = [len(repr(turn)) for turn in self._history]
+            total = sum(sizes)
+            if total <= config.HISTORY_CHARS:
+                return
+            drop = 0
+            while drop < len(sizes) - 1 and total > config.HISTORY_CHARS * HISTORY_KEEP:
+                total -= sizes[drop]
+                drop += 1
+            del self._history[:drop]
+            log.info("conversation past %d characters: dropped its %d oldest exchanges",
+                     config.HISTORY_CHARS, drop)
 
     def prewarm(self):
         """Have the API read the conversation so far into its cache while the owner is still
         talking, so the real request has only their new words left to read and its first word
         comes sooner. max_tokens=0: nothing is written back. The cache lasts an hour."""
-        self._trim()  # a new conversation, and this request writes the cache anyway (HISTORY_SLACK)
+        self._trim()
         self._refresh_system()
         messages = self._messages()
         if messages:  # cache up to the end of the last reply, which is always plain text
@@ -216,10 +223,8 @@ class Brain:
         for _ in range(MAX_TOOL_ROUNDS):
             request = timing.claude() if timing else {}
             said, response = "", None
-            # max_tokens leaves room for long tool calls (a note, an email draft, six events),
-            # whose input counts as output; the reply limit (MAX_TOKENS) applies to the talk.
             with _Race(self._client, 2 if config.CLAUDE_RACE else 1,
-                       model=config.CLAUDE_MODEL, max_tokens=TOOL_MAX_TOKENS, system=self._system,
+                       model=config.CLAUDE_MODEL, max_tokens=MAX_OUTPUT_TOKENS, system=self._system,
                        tools=tools.SCHEMAS, messages=messages, cache_control=CACHE,
                        output_config={"effort": config.CLAUDE_EFFORT}, **_thinking()) as stream:
                 for event in stream:
@@ -232,19 +237,11 @@ class Brain:
                         request.setdefault("first_token", time.perf_counter())
                         if event.delta.type == "text_delta":
                             request.setdefault("first_text", time.perf_counter())
-                            if len(said) + len(event.delta.text) > self._max_chars:
-                                break  # past the reply limit: stop here, as max_tokens would
                             said += event.delta.text
                             if on_text:
                                 on_text(event.delta.text)
-                else:
-                    response = stream.get_final_message()
+                response = stream.get_final_message()
             trace["said"].append(said)
-            if response is None:
-                request.update(done=time.perf_counter(), stop="reply limit")
-                log.warning("reply cut off at about %d tokens", self._max_tokens)
-                reply = said.strip()
-                break
             u = response.usage
             request.update(done=time.perf_counter(), stop=response.stop_reason, out=u.output_tokens,
                            **{"in": u.input_tokens, "cached": u.cache_read_input_tokens or 0,
@@ -260,7 +257,7 @@ class Brain:
             if response.stop_reason != "tool_use" or not calls:
                 reply = " ".join(b.text for b in response.content if b.type == "text").strip()
                 if response.stop_reason == "max_tokens":
-                    log.warning("reply cut off at max_tokens=%d", TOOL_MAX_TOKENS)
+                    log.warning("reply cut off at max_tokens=%d", MAX_OUTPUT_TOKENS)
                 break
 
             if on_text:
@@ -287,7 +284,7 @@ class Brain:
         turn = messages[start:start + 2] if config.CLAUDE_THINKING else messages[start:]
         with self._lock:
             self._history.append(turn + [{"role": "assistant", "content": reply}])
-        self._trim(over=HISTORY_SLACK)
+        self._trim()
         return reply
 
 

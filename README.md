@@ -28,8 +28,8 @@ when Claude needs a tool (measured on this laptop). What keeps it there, in the 
   On "Hey Jarvis" a `max_tokens=0` request loads the conversation so far into the cache while
   you're still talking: Claude's first word comes 0.65-0.9 s after the request instead of about
   0.95 s (up to 1.35 s). The cache lasts an hour rather than 5 minutes, since talking to Jarvis
-  comes in bursts. Old turns are dropped only as a conversation starts or once 5 extra have
-  piled up (`HISTORY_TURNS`): dropping one every turn changed the start of the conversation, so
+  comes in bursts. Conversations are kept whole until they pass `HISTORY_CHARS`, then the oldest
+  quarter goes at once: dropping one turn every time changed the start of the conversation, so
   none of it could be read from the cache, which costs about 0.25 s on a 20k-token conversation.
 - **Two requests at once.** Now and then the API takes 1.3-3 s rather than 0.6-0.8 s to start a
   reply, and it happens to one request at a time, so each request goes out twice and Jarvis
@@ -286,7 +286,7 @@ The hook is `deploy/claude-hook.py`, set up in `~/.claude/settings.json` for all
 Jarvis is also an MCP server (`jarvis/mcp_server.py`), so Claude on any device (claude.ai on
 the web, the desktop and phone apps, and Claude Code wherever you're signed in) can use it. It
 offers `ask_jarvis` (a message to Jarvis, answered by its own Claude with all its tools; it
-remembers the last `HISTORY_TURNS` messages from Claude sessions), `tell_owner` (spoken aloud
+remembers the conversation with Claude sessions), `tell_owner` (spoken aloud
 here, or posted in #jarvis) and every Jarvis tool directly.
 
 It listens on `127.0.0.1:MCP_PORT` (8766) only; Tailscale Funnel gives it a public HTTPS
@@ -369,10 +369,9 @@ to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 | Setting | Default | Notes |
 |---|---|---|
 | `CLAUDE_MODEL` | `claude-haiku-5-5` | Any current Claude model id |
-| `MAX_TOKENS` | `300` | Caps how long a spoken reply can be (counted as about 4 characters a token; tool calls such as long notes aren't limited by it) |
 | `CLAUDE_THINKING` | `off` | `on` lets Claude think first: slower, rarely better for this |
 | `CLAUDE_EFFORT` | `low` | `low` / `medium` / `high` |
-| `HISTORY_TURNS` | `10` | Past exchanges sent with each request (up to 5 more pile up before the oldest are dropped, so the conversation stays cached) |
+| `HISTORY_CHARS` | `480000` | Conversations are kept whole, with no limit on replies or their length; past this many characters (about 120k tokens) the oldest quarter is dropped to stay inside the context window |
 | `CLAUDE_RACE` | `on` | Send each Claude request twice at once and use whichever starts answering first |
 | `PROJECT_MODEL` | `sonnet` | Claude Code model for project mode (`opus` uses up the plan faster) |
 | `WHISPER_MODEL` | `large-v3-turbo` | `tiny.en` / `base.en` / `small.en` for CPU |
@@ -476,8 +475,17 @@ next two days, new texts and flagged emails; the time and weather when there's l
   to suit. `python -m jarvis.homecoming --dry` tries the sequence without touching the lights.
 
 "Lights on" and "lights off" (and "turn off the lights", "lights out", "kill the lights") switch
-every light, answered without Claude; anything that names a switch or asks about them goes to
-Claude as before.
+every light, answered without Claude, and a bare "Hey Jarvis, lights" toggles them (all off if
+any is on, else all on); anything that names a switch or asks about them goes to Claude as before.
+
+## Do not disturb
+
+"Hey Jarvis, do not disturb" (or "DND on", in Discord too) and Jarvis says nothing out loud
+until "do not disturb off" / "you can talk again": replies to "Hey Jarvis" and alerts (timers,
+"I'm finished in ...", `tell_owner`, project updates) are posted in #jarvis with a 🔕 instead.
+Alarms still ring, and the listening chimes still play when you wake it. Claude can also turn it
+on for a while with the `do_not_disturb` tool ("don't talk for an hour"). The state is in
+`data/dnd.json`, so it lasts through a restart.
 
 ## Intake
 
@@ -532,7 +540,7 @@ then add the module to the import line at the bottom of `jarvis/tools/__init__.p
 
 - openWakeWord 0.6.0 is installed with `--no-deps`: it lists `tflite-runtime`, which has no
   Python 3.12 build, but Jarvis runs it on ONNX instead.
-- Conversation memory (last `HISTORY_TURNS` exchanges) lasts until Jarvis restarts; notes are
+- Conversation memory (up to `HISTORY_CHARS`) lasts until Jarvis restarts; notes are
   saved in Google Drive.
 - `av` is pinned to 18.1.0: av 19 breaks faster-whisper 1.2.1.
 - The NVIDIA driver is the DKMS `nvidia-driver-595-open`, signed with the enrolled MOK key, so it

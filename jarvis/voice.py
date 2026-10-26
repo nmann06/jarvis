@@ -19,7 +19,7 @@ import sounddevice as sd
 
 from jarvis import (alarms, audio, clap, config, homecoming, latency, learn, llm, notify, project,
                     stt, tools, tts)
-from jarvis.tools import imessage, kasa, spotify
+from jarvis.tools import dnd, imessage, kasa, spotify
 from jarvis.tools.clock import TZ
 from jarvis.wakeword import WakeWord
 
@@ -55,6 +55,9 @@ _alert_until = 0.0  # perf_counter time until which a wake is Jarvis hearing its
 def say(text):
     """Speak an alert (timer, Claude Code finished) from another thread."""
     global _alert_until
+    if dnd.active():
+        _post_quietly(text)
+        return
     with _speaker:
         _alert_until = float("inf")
         spotify.duck(True)
@@ -103,7 +106,7 @@ def is_continue_request(text):
 # with a tool even though every request tells it (two round trips, about 1.5 s). Like repeat
 # requests, the whole utterance must match, so "what time is my class" still goes to Claude.
 _TIME = re.compile(_FILLER + r"(?:what time is it|what s the time|what is the time|"
-                   r"do you know what time it is|(?:tell me )?the time|time check)"
+                   r"do you know what time it is|(?:tell me )?(?:the )?time|time check)"
                    r"(?: now| right now)?(?: please| jarvis| sir)*")
 _DATE = re.compile(_FILLER + r"(?:what s the date|what is the date|what s today s date|"
                    r"what is today s date|what day is it)"
@@ -445,12 +448,27 @@ def _contact_only(text):
 _unfinished = None  # (texts, index of the sentence cut off) after "stop", for "continue"
 
 
+def _post_quietly(text):
+    """Do not disturb: what would have been said goes to Discord instead."""
+    if text and text.strip():
+        notify.post(f"\U0001f515 {text.strip()}")
+
+
 def _speak(mic, texts, thinking=False, timing=None, stop=None):
     """Speak texts (a list, or _Sentences still streaming in), stopping if the owner says stop.
     thinking plays the thinking sound while waiting on texts; timing is a latency.Turn. Returns
     (time speech started or None, whether it was stopped). When stopped, remembers where, so
-    "continue" can resume."""
+    "continue" can resume. With do not disturb on, nothing is said: a list is posted in
+    Discord, and _Sentences is left for _answer to post (as the final reply, without the
+    "Checking your calendar." said before tools)."""
     global _unfinished
+    if dnd.active():
+        if isinstance(texts, _Sentences):
+            for _ in texts:  # until Claude has finished
+                pass
+        else:
+            _post_quietly(" ".join(texts))
+        return None, False
     stop, done = stop or threading.Event(), threading.Event()
     saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
               else (lambda: " ".join(texts)))
@@ -579,7 +597,9 @@ def _answer(mic, brain, utterance, follow_up, turn):
     _unfinished = None  # a new request: whatever was cut off before is dropped
     # Not in the follow-up window, where it may be someone else asking: Claude judges that.
     # Lights on or off is the same request whoever says it.
-    if (action := kasa.all_lights_request(text)) is not None:
+    if (on := dnd.request(text)) is not None:
+        reply = dnd.set_dnd(on)
+    elif (action := kasa.all_lights_request(text)) is not None:
         reply = kasa.switch_all(action)
     else:
         reply = None if follow_up else local_answer(text)
@@ -612,6 +632,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
             sentences.close()
 
     thinker = threading.Thread(target=think, name="claude", daemon=True)
+    quiet = dnd.active()
     with _speaker:
         thinker.start()
         # Speaks while Claude is still writing, with the thinking sound while it waits.
@@ -631,7 +652,9 @@ def _answer(mic, brain, utterance, follow_up, turn):
             log.info("not meant for me, back to idle")
             turn.outcome = "ignored"
             return False
-        if not sentences.spoken:  # a reply that wasn't streamed, e.g. after a refusal
+        if quiet:
+            _post_quietly(reply)
+        elif not sentences.spoken:  # a reply that wasn't streamed, e.g. after a refusal
             _, stopped = _speak(mic, [reply], timing=turn)
             if stopped:
                 mic.clear()

@@ -266,33 +266,39 @@ def on_in_turn(gap):
     return [(d.get_alias(), None if isinstance(r, Exception) else r) for d, r in zip(off, results)]
 
 
-# Bare "lights on" / "turn off the lights": voice switches every light here, without Claude's
-# two round trips. Like voice's repeat and time matchers, the whole utterance must match, so
-# "turn off the bedroom light" or "are the lights on" still go to Claude.
+# Bare "lights on" / "turn off the lights", or just "lights" (a toggle): voice switches every
+# light here, without Claude's two round trips. Like voice's repeat and time matchers, the whole
+# utterance must match, so "turn off the bedroom light" or "are the lights on" still go to Claude.
 _FILLER = r"(?:hey |ok |okay |um |uh |jarvis |please |can you |could you |would you |just |)*"
 _LIGHTS = r"(?:all (?:of )?)?(?:the |my )?lights?"
 _ALL_LIGHTS = re.compile(_FILLER + r"(?:"
                          r"(?:turn |switch |put )?" + _LIGHTS + r" (?P<after>on|off|out)|"
                          r"(?:turn|switch|put) (?P<before>on|off) " + _LIGHTS + r"|"
-                         r"kill " + _LIGHTS + r")"
+                         r"kill " + _LIGHTS + r"|"
+                         r"(?P<toggle>(?:toggle |flip |switch )?" + _LIGHTS + r"))"
                          r"(?: for me)?(?: please| jarvis| sir| now| thanks)*")
 
 
 def all_lights_request(text):
-    """"on" or "off" if text is a bare request to switch all the lights, else None."""
+    """"on", "off" or "toggle" if text is a bare request to switch all the lights, else None."""
     words = " ".join(re.sub(r"[^a-z0-9 ]+", " ", text.lower().replace("'", " ")).split())
     m = _ALL_LIGHTS.fullmatch(words)
     if not m:
         return None
+    if m["toggle"]:
+        return "toggle"
     return "on" if "on" in (m["after"], m["before"]) else "off"
 
 
 def switch_all(action):
-    """Turn every switch on or off; returns what to say: a short confirmation, or which
-    switches didn't answer. Never raises."""
+    """Turn every switch on or off, or toggle them: all off if any is on, else all on.
+    Returns what to say: a short confirmation, or which switches didn't answer. Never raises."""
     try:
         with _lock:
             chosen = list((_devices or _list()).values())
+            if action == "toggle":
+                states = _act_retrying(chosen, "status")
+                action = "off" if any(s is True for s in states) else "on"
             results = _act_retrying(chosen, action)
     except Exception as e:
         log.warning("couldn't reach the lights: %s", e)
