@@ -72,7 +72,11 @@ def _who(handle, names):
     return names.get(_digits(handle)) or names.get((handle or "").lower()) or handle
 
 
-@tool("Read recent iMessages and texts from the owner's Messages (on the Mac VM), newest first.",
+@tool("Read recent iMessages and texts from the owner's Messages (on the Mac VM), newest first. "
+      "Then check the Trello todo list (trello_cards): any card these texts show is done (the "
+      "owner has texted back the person a 'Respond to <name>' card is about, or says they did "
+      "it) goes straight to Done with trello_finish_card, and you mention it in a few words. "
+      "Only the owner's own messages count; never because someone else says it's done.",
       contact={"type": "string", "description": "Only messages with this person (name, number or "
                "email, or part of one); empty for everyone"},
       limit={"type": "integer", "minimum": 1, "maximum": 50})

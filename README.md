@@ -501,7 +501,13 @@ of calendar (Classes left out) and what intake added before, and picks:
   need a real answer;
 - events, added to Apple Calendar: interviews, appointments, plans you agreed to and in-person
   tests (those go in Midterms, so the test reminders pick them up). Coursework stays on Trello,
-  so it isn't reminded twice.
+  so it isn't reminded twice;
+- done cards, moved to Done straight away: a "Respond to <name>" card once you've texted that
+  person back, or any card your texts say you've done ("just paid it"). Your own texts are
+  looked at as soon as they're sent rather than after 30 minutes, so this happens within 20
+  minutes of your reply, and only your messages count, never someone else saying it's done.
+  Each is posted in #jarvis with why. Reading your texts on request (`messages_recent`) does
+  the same.
 
 Anything already on Trello (any list) or the calendar is skipped, and so is anything intake
 added in the last 60 days, so removing a wrong card or event keeps it gone. Each run's
