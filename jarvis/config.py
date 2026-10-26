@@ -17,11 +17,11 @@ def _device(value):
 
 
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-5-5")
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "300"))  # caps spoken reply length and cost
-MAX_TOKENS_DISCORD = int(os.getenv("MAX_TOKENS_DISCORD", "2000"))  # text replies can be longer
 CLAUDE_EFFORT = os.getenv("CLAUDE_EFFORT", "low")  # low/medium/high: more thinking = slower
 CLAUDE_THINKING = os.getenv("CLAUDE_THINKING", "off") == "on"  # thinking before replying
-HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "10"))  # past exchanges sent with each request
+# The conversation is kept whole; only past this many characters of it (about 120k tokens, to
+# stay inside the context window) are the oldest exchanges dropped.
+HISTORY_CHARS = int(os.getenv("HISTORY_CHARS", "480000"))
 PROJECT_MODEL = os.getenv("PROJECT_MODEL", "sonnet")  # Claude Code model for project mode
 # Send each Claude request twice at once and use whichever starts answering first: cuts the
 # occasional 1.5-3 s wait for a reply to start, for a little more API cost.

@@ -13,7 +13,7 @@ from jarvis import config
 def main():
     client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY, which config loaded from .env
     start = time.perf_counter()
-    reply = client.messages.create(model=config.CLAUDE_MODEL, max_tokens=config.MAX_TOKENS,
+    reply = client.messages.create(model=config.CLAUDE_MODEL, max_tokens=300,
                                    messages=[{"role": "user", "content": "Say hello in five words"}])
     elapsed = time.perf_counter() - start
     print(f"> {reply.content[0].text}")

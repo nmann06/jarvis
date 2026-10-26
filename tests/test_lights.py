@@ -16,11 +16,11 @@ ON = ["Lights on.", "lights on", "Light on", "Turn the lights on.", "Turn on the
 OFF = ["Lights off.", "lights out", "Turn off the lights.", "Turn the lights off, please.",
        "Could you turn off the lights?", "Kill the lights", "Turn the lights out",
        "Jarvis, lights off", "Switch off all the lights", "All the lights off now"]
-NOT = ["Are the lights on?", "Turn off the bedroom light", "Turn light 1 off", "Lights",
+NOT = ["Are the lights on?", "Turn off the bedroom light", "Turn light 1 off",
        "Turn the lights on at seven", "Lights on in five minutes", "Which lights are on?",
        "Turn off the lights and play some music", "Turn on the lamp", "Is light two on?",
        "Turn the music off", "Turn it off", "I left the lights on", "Leave the lights on",
-       "Don't turn the lights off", "Turn the lights down", "Toggle the lights", ""]
+       "Don't turn the lights off", "Turn the lights down", ""]
 
 
 class Device:
@@ -42,6 +42,11 @@ class Phrases(unittest.TestCase):
     def test_off(self):
         for text in OFF:
             self.assertEqual(kasa.all_lights_request(text), "off", text)
+
+    def test_toggle(self):
+        for text in ("Hey Jarvis, lights.", "lights", "Lights please.", "toggle the lights",
+                     "Jarvis, the lights."):
+            self.assertEqual(kasa.all_lights_request(text), "toggle", text)
 
     def test_not_bare(self):
         for text in NOT:
@@ -84,6 +89,14 @@ class SwitchAll(unittest.TestCase):
     def test_none_answer(self):
         self.assertEqual(self.switch("on", [None, None, None]),
                          "The lights didn't answer, I'm afraid.")
+
+    def test_toggle(self):
+        for states, action in (([False, True, False], "off"), ([False, False, None], "on")):
+            with mock.patch.object(kasa, "_devices", DEVICES), \
+                 mock.patch.object(kasa, "_act_retrying",
+                                   side_effect=[states, [action == "on"] * 3]) as act:
+                self.assertEqual(kasa.switch_all("toggle"), f"Lights {action}, sir.")
+            self.assertEqual([c.args[1] for c in act.call_args_list], ["status", action])
 
     def test_no_cloud(self):
         with mock.patch.object(kasa, "_devices", None), \

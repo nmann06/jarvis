@@ -12,6 +12,7 @@ import logging
 import discord
 
 from jarvis import alarms, config, llm, notify, project
+from jarvis.tools import dnd
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,11 @@ class JarvisBot(discord.Client):
             return
         log.info("discord you: %s", text)
         loop = asyncio.get_running_loop()
+        if (on := dnd.request(text)) is not None:  # without Claude, as by voice
+            reply = await loop.run_in_executor(None, dnd.set_dnd, on)
+            log.info("discord jarvis (do not disturb, local): %s", reply)
+            await message.channel.send(reply)
+            return
         # Alarms are handled without Claude (jarvis.alarms), as by voice.
         if (reply := await loop.run_in_executor(None, alarms.local_reply, text, "discord")):
             log.info("discord jarvis (alarm, local): %s", reply)
