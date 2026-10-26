@@ -366,6 +366,10 @@ to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 
 ## Settings (`.env`)
 
+The Jarvis window's `/jarvis settings` page lists these by category, with search, and changes
+them (then restarts Jarvis on `r`); it goes through `python -m jarvis.settings` (`list`, `set
+KEY VALUE`, `restart`), which never shows a secret's value. Do not disturb is there too.
+
 | Setting | Default | Notes |
 |---|---|---|
 | `CLAUDE_MODEL` | `claude-haiku-5-5` | Any current Claude model id |
