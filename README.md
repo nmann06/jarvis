@@ -232,6 +232,20 @@ A school account may say the app **needs admin approval**: Queen's then has to a
 use a personal OneDrive. Your own account usually can't register apps in the school's directory,
 which is why step 1 can be done with a personal Microsoft account at portal.azure.com.
 
+### Kasa switches
+
+`lights` turns the Kasa smart switches on and off and says which are on, by the names they
+have in the Kasa app. It goes through TP-Link's cloud, not the LAN: the building's Wi-Fi keeps
+devices from seeing each other, so hyde can't reach them directly (about a second a command).
+
+1. `.venv/bin/python -m jarvis.tools.kasa login`: Kasa account email, password, and the emailed
+   code if it asks. Only the tokens are kept, in `data/kasa-token.json`; they renew themselves.
+2. Optional: `KASA_USER`/`KASA_PASSWORD` in `.env`, so it can log in again on its own if the
+   saved login ever stops renewing.
+3. `systemctl --user restart jarvis`.
+
+`.venv/bin/python -m jarvis.tools.kasa` lists the switches it can see.
+
 ### Discord setup
 
 1. discord.com/developers/applications -> New Application -> Bot -> Reset Token; put it in `.env`
@@ -346,6 +360,8 @@ to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 .venv/bin/python -m jarvis.llm "What time is it?"       # ask Claude by text, with tools
 .venv/bin/python -m tests.discord_ping                      # DMs you a test notification
 .venv/bin/python -m jarvis.wakeword                        # prints WAKE + what you said, Ctrl+C to stop
+.venv/bin/python -m jarvis.clap                            # prints each clap (and near miss); --phrase listens for "Daddy's home" too
+.venv/bin/python -m jarvis.homecoming --dry                # the homecoming sound, greeting and update, lights left alone
 ```
 
 ## Settings (`.env`)
@@ -365,6 +381,8 @@ to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 | `TTS_LENGTH_SCALE`, `TTS_VOLUME` | `1.0` | Speech speed (>1 is slower) and loudness |
 | `THINKING_SOUND` | `on` | Soft blips while waiting on Claude or a tool (`off` for silence) |
 | `WAKE_THRESHOLD` | `0.5` | Raise if it wakes by itself, lower if it misses you |
+| `HOMECOMING` | `on` | Clap twice, then "Daddy's home" (see Homecoming) |
+| `CLAP_PEAK_DB`, `CLAP_MIN_DBFS` | `15`, `-40` | How far above the background, and how loud, a clap must be: raise if it hears claps that weren't, lower if it misses yours |
 | `SILENCE_SECONDS` | `0.8` | Pause that ends what you're saying |
 | `QUICK_SILENCE_SECONDS` | `0.5` | Shorter pause that ends it when it's already a finished sentence ("What time is it?"); set to `SILENCE_SECONDS` to always wait the full pause |
 | `FOLLOW_UP_SECONDS` | `5` | How long it listens for a follow-up after replying |
@@ -440,6 +458,27 @@ understand gets a fixed reply. Claude's system prompt tells it alarms aren't its
 - `python -m jarvis.alarms "set an alarm for 7:30 tomorrow"` shows what a phrase parses to;
   `python -m jarvis.alarms --play` plays each sound.
 
+## Homecoming
+
+Clap twice, then say "Daddy's home" or "Wake up" (or "Wake up, daddy's home"), no wake word
+needed: a power-up sound, the lights coming on one by one (any already on are left alone), a
+one-line greeting, and a short update (the next thing on the calendar, anything due in the
+next two days, new texts and flagged emails; the time and weather when there's little else).
+"Stop" cuts the talking short.
+
+- `jarvis/clap.py` hears the claps: two sharp, high-pitched sounds 0.15 to 0.9 s apart that
+  die away fast, with no third clap after (so applause, knocking and speech don't count).
+  Whisper then has to hear the phrase within 4 s, or it goes back to listening without a sound.
+  The update starts being gathered at the claps, so it's ready by the time the greeting ends.
+- `jarvis/homecoming.py` runs the sequence. It waits 60 s before claps count again.
+- Tuning: `python -m jarvis.clap` prints each clap and each near miss with why it didn't count;
+  adjust `CLAP_PEAK_DB` / `CLAP_MIN_DBFS` (and the other `CLAP_` settings in `jarvis/config.py`)
+  to suit. `python -m jarvis.homecoming --dry` tries the sequence without touching the lights.
+
+"Lights on" and "lights off" (and "turn off the lights", "lights out", "kill the lights") switch
+every light, answered without Claude; anything that names a switch or asks about them goes to
+Claude as before.
+
 ## Intake
 
 `jarvis/intake.py`, run every 20 minutes from the proactive loop, adds todos and calendar events
@@ -470,7 +509,7 @@ add, without adding anything.
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
-(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), `speaker_volume` (Jarvis and the music together; Spotify's own volume is the music alone), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `project_message` / `resume_project` / `list_projects` (project mode, above), OnQ and Smith Learning (read-only):
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), `speaker_volume` (Jarvis and the music together; Spotify's own volume is the music alone), `lights` (Kasa switches, above), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `project_message` / `resume_project` / `list_projects` (project mode, above), OnQ and Smith Learning (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
 `onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`),
 `onq_content` (everything posted under Content, plus pages linked from module descriptions, as some

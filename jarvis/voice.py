@@ -17,10 +17,16 @@ from datetime import datetime
 import numpy as np
 import sounddevice as sd
 
-from jarvis import alarms, audio, config, latency, learn, llm, notify, project, stt, tools, tts
-from jarvis.tools import imessage, spotify
+from jarvis import (alarms, audio, clap, config, homecoming, latency, learn, llm, notify, project,
+                    stt, tools, tts)
+from jarvis.tools import imessage, kasa, spotify
 from jarvis.tools.clock import TZ
 from jarvis.wakeword import WakeWord
+
+try:  # extra wake words that act without a sound, in the gitignored private/ (its README.md)
+    from private import wake_words as private_wake_words
+except ImportError:
+    private_wake_words = None
 
 log = logging.getLogger("jarvis.voice")
 
@@ -219,11 +225,12 @@ class _Sentences:
 
 # Said while Jarvis is talking (or thinking), these cut it off. Vosk listens with only these
 # phrases plus [unk] (anything else). One counts wherever it comes in what Vosk heard: Jarvis's
-# echo runs on into the owner's words ("it yes sir shut up"), so the whole of it rarely is a
-# stop phrase. Echo of Jarvis saying "stop by the office" is caught below.
-STOP_PHRASES = ["stop", "cancel", "stop it", "stop talking", "shut up", "be quiet", "quiet",
+# echo runs on into the owner's words ("it yes sir be quiet"), so the whole of it rarely is a
+# stop phrase. Echo of Jarvis saying "stop by the office" is caught below. "Shut up" isn't
+# one (the owner asked).
+STOP_PHRASES = ["stop", "cancel", "stop it", "stop talking", "be quiet", "quiet",
                 "enough", "that's enough", "never mind", "forget it", "jarvis stop", "jarvis cancel",
-                "okay stop", "stop stop", "shut up jarvis", "jarvis shut up"]
+                "okay stop", "stop stop"]
 # Not stops, but in the grammar so Vosk has somewhere else to put them: with only the stop
 # phrases to choose from, an echoed "yes sir" came out as "stop".
 _DECOYS = ["sir", "yes sir", "no sir", "of course sir", "certainly sir", "please"]
@@ -233,7 +240,7 @@ _vosk = None
 # window heard only "raise the volume or is there something"; the stop itself was "Stop!".
 ECHO_CHECK_PAD = 0.1
 # Any of these in Whisper's words means the owner did say stop (not "it" from "stop it").
-_STOP_WORDS = {"stop", "cancel", "shut", "quiet", "enough", "forget", "nevermind"}
+_STOP_WORDS = {"stop", "cancel", "quiet", "enough", "forget", "nevermind"}
 
 
 def _stop_recognizer(phrases=None):
@@ -362,7 +369,8 @@ def _listen_for_stop(mic, stop, done, saying, reply):
                 w.writeframes(np.concatenate(heard).tobytes())
 
 
-# Every now and then a stop or a task gets "Say please." and waits for it (the owner asked).
+# Every now and then a task gets "Say please." and waits for it (the owner asked). Never a
+# stop or a cancel.
 SAY_PLEASE = "Say please."
 PLEASE_NOTE = (f"If this asks you to do something (send, draft, add, save, move, start or work on "
                f"something; not just answer a question), don't do it yet and don't call any tool: "
@@ -378,7 +386,7 @@ _TASK = re.compile(r"^(?:(?:hey |ok |okay )?jarvis[,.]? )?(?:(?:can|could|would|
                    r"move|finish|remind|delete|work on|research|look into|plan|tell (?!me\b))\b",
                    re.I)
 PLEASE_ASKS = 3  # "Say please." at most this many times for one request, then let it go
-_awaiting_please = None  # {"kind": "stop" or "task", "asks": n, "request": text} after "Say please."
+_awaiting_please = None  # {"asks": n, "request": text} after "Say please."
 
 
 def _said_please(text):
@@ -392,18 +400,6 @@ def _please_roll(text):
     return _please_tests_left() > 0 or random.random() < config.SAY_PLEASE_RATE
 
 
-def _please_after_stop(mic, seconds=1.0):
-    """Whether the owner said "stop, please": the stop fires on "stop", before the please."""
-    blocks, end = [], time.monotonic() + seconds
-    while time.monotonic() < end:
-        if (block := mic.read(timeout=0.1)) is not None:
-            blocks.append(block)
-    if not blocks:
-        return False
-    heard = stt.transcribe(np.concatenate(blocks).astype(np.float32) / 32768)
-    return _said_please(heard)
-
-
 def _please_tests_path():
     return config.ROOT / "data" / "say-please-tests"
 
@@ -415,15 +411,15 @@ def _please_tests_left():
         return config.SAY_PLEASE_TESTS
 
 
-def _asked_please(kind, request=None):
+def _asked_please(request):
     """Jarvis has just said "Say please.": wait for it, and count a test run."""
     global _awaiting_please
-    _awaiting_please = {"kind": kind, "asks": 1, "request": request}
+    _awaiting_please = {"asks": 1, "request": request}
     if (left := _please_tests_left()) > 0:
         path = _please_tests_path()
         path.parent.mkdir(exist_ok=True)
         path.write_text(str(config.SAY_PLEASE_TESTS - left + 1))
-    log.info("said %r after a %s; waiting for please", SAY_PLEASE, kind)
+    log.info("said %r after a task; waiting for please", SAY_PLEASE)
 
 
 # "Text Hyde" with no message: Jarvis asks what it should say, and the answer is the message.
@@ -538,14 +534,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
     if _awaiting_please:
         waiting, _awaiting_please = _awaiting_please, None
         if _said_please(text):
-            log.info("heard please: going ahead with the %s", waiting["kind"])
-            if waiting["kind"] == "stop":
-                _unfinished = None
-                with _speaker:
-                    _speak(mic, ["Thank you, sir."], timing=turn)
-                mic.clear()
-                turn.outcome = "stopped after please"
-                return False
+            log.info("heard please: going ahead with the task")
             extra = set(_word_list(text)) - _PLEASE_FILLER
             text = waiting["request"] + (f" ({text})" if extra else "")
             note, follow_up = "", False  # "": no PLEASE_NOTE this time
@@ -589,7 +578,12 @@ def _answer(mic, brain, utterance, follow_up, turn):
         return done
     _unfinished = None  # a new request: whatever was cut off before is dropped
     # Not in the follow-up window, where it may be someone else asking: Claude judges that.
-    if not follow_up and (reply := local_answer(text)) is not None:
+    # Lights on or off is the same request whoever says it.
+    if (action := kasa.all_lights_request(text)) is not None:
+        reply = kasa.switch_all(action)
+    else:
+        reply = None if follow_up else local_answer(text)
+    if reply is not None:
         log.info("answering locally: %s", reply)
         with _speaker:
             _, stopped = _speak(mic, [reply], timing=turn)
@@ -627,14 +621,6 @@ def _answer(mic, brain, utterance, follow_up, turn):
         if stopped:
             # "Stop" or "cancel": Claude may still be writing, but nobody wants the rest.
             turn.outcome = "stopped"
-            # (Before the mic is cleared: the please of "stop, please" may be queued already.)
-            if _please_roll(getattr(stop, "heard", "")) and not _please_after_stop(mic):
-                mic.clear()
-                tts.speak_all([SAY_PLEASE])
-                mic.clear()
-                _asked_please("stop")
-                turn.outcome = "stopped, said say please"
-                return True  # the follow-up window, for the please
             mic.clear()
             return False
         thinker.join()
@@ -655,7 +641,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
     turn.outcome = "answered"
     if note == PLEASE_NOTE and _last_reply.strip().lower() == SAY_PLEASE.lower():
         brain.forget_last()
-        _asked_please("task", text)
+        _asked_please(text)
         turn.outcome = "said say please"
     log.info("jarvis: %s", _last_reply)
     mic.clear()  # drop Jarvis's own voice picked up by the mic
@@ -690,6 +676,45 @@ def _speak_updates(mic):
         _speak(mic, lines)
     _last_reply = " ".join(lines)
     mic.clear()
+
+
+HOMECOMING_COOLDOWN = 60  # seconds after the homecoming sequence before claps count again
+_claps_ignored_until = 0.0  # perf_counter time
+
+
+def _homecoming(mic, claps):
+    """A double clap: listen for "Daddy's home" and, if it comes, run the homecoming sequence
+    (jarvis.homecoming). No chime first, so claps that weren't for Jarvis (a knock, music) go
+    unnoticed."""
+    global _claps_ignored_until
+    homecoming.prepare()  # starts gathering the update while the owner talks
+    matched, text = clap.heard_phrase(mic, stt.transcribe, preroll=claps.preroll)
+    if not matched:
+        log.info("double clap, then %s: not the homecoming phrase, back to listening",
+                 repr(text) if text else "nothing said")
+        mic.clear()
+        return
+    log.info("double clap and %r: homecoming", text)
+    said, stopped = [], False
+
+    def speak(texts):
+        global _last_reply
+        nonlocal stopped
+        if stopped:  # "stop" ends the talking for the rest of the sequence
+            return
+        with _speaker:
+            _, stopped = _speak(mic, texts)
+        said.extend(texts)
+        _last_reply = " ".join(said)
+        mic.clear()
+
+    spotify.duck(True)
+    try:
+        homecoming.run(play, speak)
+    finally:
+        spotify.duck(False)
+        _claps_ignored_until = time.perf_counter() + HOMECOMING_COOLDOWN
+        mic.clear()
 
 
 # While an alarm rings, any of these (no wake word needed) turns it off, or snoozes it.
@@ -779,13 +804,44 @@ def run():
     _stop_recognizer()
     notify.register("voice", say)
     spotify.duck(False)  # music left turned down by a crash comes back up
+    # Double claps (then "Daddy's home") need no wake word: the detector hears every block.
+    claps = clap.ClapDetector() if config.HOMECOMING else None
+    silent = private_wake_words.load() if private_wake_words else []
+    listeners = ([claps] if claps else []) + silent
     with audio.Mic() as mic:
-        log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)", config.WAKE_THRESHOLD)
+        log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)%s%s", config.WAKE_THRESHOLD,
+                 " and double claps" if claps else "",
+                 f" and {len(silent)} silent wake word(s)" if silent else "")
         while True:
+            for listener in listeners:
+                listener.reset()  # the mic was read elsewhere since: what came before doesn't count
             score = wake.wait(mic, interrupt=lambda: (alarms.ringing()
-                                                      or not project.speech.empty()))
+                                                      or not project.speech.empty()),
+                              # A list, not a generator: every listener must hear every block.
+                              also=listeners and (lambda block: any([listener.heard(block)
+                                                                     for listener in listeners])))
             if score is None and alarms.ringing():
                 _alarm_mode(mic, wake, brain)
+                continue
+            if score is None and (fired := next((s for s in silent if s.fired), None)):
+                if mic.captured < _alert_until:
+                    log.info("%s during an alert: ignored", fired.name)
+                else:
+                    try:
+                        fired.handle(mic)
+                    except Exception:
+                        log.exception("%s failed", fired.name)
+                    mic.clear()
+                continue
+            if score is None and claps and claps.fired:
+                if mic.captured < _alert_until:
+                    log.info("double clap during an alert: ignored")
+                elif mic.captured < _claps_ignored_until:
+                    log.info("double clap within %ds of the last homecoming: ignored",
+                             HOMECOMING_COOLDOWN)
+                else:
+                    log.info("double clap (%.2fs apart)", claps.gap)
+                    _homecoming(mic, claps)
                 continue
             if score is None:  # a project has something to say
                 _speak_updates(mic)

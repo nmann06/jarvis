@@ -22,9 +22,11 @@ class WakeWord:
         self._model = Model(wakeword_models=[MODEL], inference_framework="onnx")
         self.preroll = deque(maxlen=PREROLL_BLOCKS)
 
-    def wait(self, mic, interrupt=None):
+    def wait(self, mic, interrupt=None, also=None):
         """Block until the wake word is heard; returns the detection score. If interrupt is
-        given, it's checked every block, and wait returns None as soon as it's true.
+        given, it's checked every block, and wait returns None as soon as it's true. If also
+        is given, it's fed every block too (the clap detector), and wait returns None as soon
+        as it returns True.
 
         Afterwards self.preroll holds the last blocks heard, which may contain the start of
         the request if it followed "Hey Jarvis" without a pause.
@@ -33,7 +35,10 @@ class WakeWord:
         while True:
             if interrupt and interrupt():
                 return None
-            if (score := self.heard(mic.read())) is not None:
+            block = mic.read()
+            if also and also(block):
+                return None
+            if (score := self.heard(block)) is not None:
                 return score
 
     def heard(self, block):

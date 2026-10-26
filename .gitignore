@@ -5,3 +5,4 @@ models/
 .google_token.json
 google_client.json
 data/
+private/

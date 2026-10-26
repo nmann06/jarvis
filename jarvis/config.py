@@ -64,6 +64,10 @@ ONEDRIVE_TENANT = os.getenv("ONEDRIVE_TENANT", "common")
 IMESSAGE_SSH = os.getenv("IMESSAGE_SSH", "")  # ssh host of the Mac VM running Messages (README)
 SMITH_USER = os.getenv("SMITH_USER", "")  # smithlearning.ca login, so expired sessions renew
 SMITH_PASSWORD = os.getenv("SMITH_PASSWORD", "")
+# Kasa account, only so the switches log in again by themselves if the saved login expires;
+# `python -m jarvis.tools.kasa login` works without them (README: Kasa switches)
+KASA_USER = os.getenv("KASA_USER", "")
+KASA_PASSWORD = os.getenv("KASA_PASSWORD", "")
 
 PIPER_VOICE = ROOT / os.getenv("PIPER_VOICE", "models/piper/en_GB-alan-medium.onnx")
 # Small Vosk model that listens only for "stop"/"cancel" while Jarvis is talking.
@@ -72,9 +76,9 @@ SAVE_STOP_AUDIO = os.getenv("SAVE_STOP_AUDIO", "") == "1"  # debugging: keep wha
 TTS_LENGTH_SCALE = float(os.getenv("TTS_LENGTH_SCALE", "1.0"))  # >1 slower, <1 faster
 TTS_VOLUME = float(os.getenv("TTS_VOLUME", "1.0"))
 THINKING_SOUND = os.getenv("THINKING_SOUND", "on") == "on"  # soft blips while waiting on Claude
-# How often a stop or a task gets "Say please." (and waits for it), unless please was said.
+# How often a task gets "Say please." (and waits for it), unless please was said.
 # The first SAY_PLEASE_TESTS times (counted in data/say-please-tests) it always does, to try it.
-SAY_PLEASE_RATE = float(os.getenv("SAY_PLEASE_RATE", "0.05"))
+SAY_PLEASE_RATE = float(os.getenv("SAY_PLEASE_RATE", "0.15"))
 SAY_PLEASE_TESTS = int(os.getenv("SAY_PLEASE_TESTS", "2"))
 # Alarms (jarvis/alarms.py): handled without Claude.
 ALARM_SOUND = os.getenv("ALARM_SOUND", "classic")  # default sound until the owner picks one
@@ -87,6 +91,19 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")  # "cuda" or "cpu"
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
 WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))  # 0-1; higher = fewer false wakes
+# Homecoming (jarvis/homecoming.py): clap twice, then say "Daddy's home"; no wake word needed.
+HOMECOMING = os.getenv("HOMECOMING", "on") == "on"
+# A clap (jarvis/clap.py; tune with python -m jarvis.clap) peaks this many dB above the
+# background and at least this loud (dBFS, 5 ms): raise them if it hears claps that weren't,
+# lower them if it misses yours.
+CLAP_PEAK_DB = float(os.getenv("CLAP_PEAK_DB", "15"))
+CLAP_MIN_DBFS = float(os.getenv("CLAP_MIN_DBFS", "-40"))
+# How high-pitched it is: 1 for hiss, 0.1 to 1 for claps, under 0.1 for a voice, a thump or a
+# knock on a door
+CLAP_HIGH_FREQ = float(os.getenv("CLAP_HIGH_FREQ", "0.07"))
+CLAP_DECAY_SECONDS = float(os.getenv("CLAP_DECAY_SECONDS", "0.15"))  # dies away within this
+CLAP_MIN_GAP = float(os.getenv("CLAP_MIN_GAP", "0.15"))  # seconds between the two claps
+CLAP_MAX_GAP = float(os.getenv("CLAP_MAX_GAP", "0.9"))
 SPEECH_THRESHOLD = float(os.getenv("SPEECH_THRESHOLD", "0.5"))  # Silero VAD speech probability
 SILENCE_SECONDS = float(os.getenv("SILENCE_SECONDS", "0.8"))  # pause that ends an utterance
 # Shorter pause that ends it when the words so far are a finished sentence ("What time is
