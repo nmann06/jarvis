@@ -61,12 +61,18 @@ def set_dnd(on, minutes=None):
 
 
 @tool("Do not disturb: while on, Jarvis speaks nothing out loud (replies and alerts go to "
-      "Discord instead; alarms still ring). Turn it on or off; minutes is how long it stays "
-      "on, 0 for until turned off.",
-      on={"type": "boolean"},
+      "Discord instead; alarms still ring). Turn it on or off, or check it with status (only "
+      "change it when asked to); minutes is how long it stays on, 0 for until turned off.",
+      action={"type": "string", "enum": ["on", "off", "status"]},
       minutes={"type": "integer", "minimum": 0})
-def do_not_disturb(on, minutes):
-    return set_dnd(on, minutes or None)
+def do_not_disturb(action, minutes):
+    if action == "status":
+        if not active():
+            return "Do not disturb is off."
+        until = _load().get("until")
+        return ("Do not disturb is on" + (f" until {datetime.fromisoformat(until):%-I:%M %p}."
+                                         if until else ", until turned off."))
+    return set_dnd(action == "on", minutes or None)
 
 
 # A bare request to turn it on or off, by voice or Discord: the whole message must match, so
