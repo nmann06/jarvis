@@ -478,6 +478,18 @@ next two days, new texts and flagged emails; the time and weather when there's l
 every light, answered without Claude, and a bare "Hey Jarvis, lights" toggles them (all off if
 any is on, else all on); anything that names a switch or asks about them goes to Claude as before.
 
+## Phone battery
+
+Every 5 minutes Jarvis reads your iPhone's battery from Find My on the Mac VM (signed in to
+your Apple ID for Messages): on Monterey the Find My app keeps what it shows in a plain JSON
+cache, `~/Library/Caches/com.apple.findmy.fmipcore/Devices.data`, refreshed about once a minute
+while it's open. If that's over 15 minutes old, Jarvis opens Find My again (hidden). At 20% and
+10% (`PHONE_WARN_AT`) while not charging it posts in #jarvis, and says it out loud too from
+8 am to 10 pm unless do not disturb is on. It warns again once the phone has charged.
+`phone_battery` lets Claude answer "what's my phone battery at?". The phone is your own iPhone
+in Find My (family members' devices are left out), or `FINDMY_PHONE`.
+`.venv/bin/python -m jarvis.tools.findmy` prints every device's battery it can see.
+
 ## Do not disturb
 
 "Hey Jarvis, do not disturb" (or "DND on", in Discord too) and Jarvis says nothing out loud

@@ -62,6 +62,9 @@ ONEDRIVE_CLIENT_ID = os.getenv("ONEDRIVE_CLIENT_ID", "")  # Entra app registrati
 # school or work tenant such as queensu.ca
 ONEDRIVE_TENANT = os.getenv("ONEDRIVE_TENANT", "common")
 IMESSAGE_SSH = os.getenv("IMESSAGE_SSH", "")  # ssh host of the Mac VM running Messages (README)
+FINDMY_PHONE = os.getenv("FINDMY_PHONE", "")  # the phone's name in Find My; empty: the owner's iPhone
+# Phone battery alerts at these percentages (on the way down, not while charging)
+PHONE_WARN_AT = [int(p) for p in os.getenv("PHONE_WARN_AT", "20,10").split(",") if p.strip()]
 SMITH_USER = os.getenv("SMITH_USER", "")  # smithlearning.ca login, so expired sessions renew
 SMITH_PASSWORD = os.getenv("SMITH_PASSWORD", "")
 # Kasa account, only so the switches log in again by themselves if the saved login expires;

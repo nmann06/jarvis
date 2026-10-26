@@ -8,7 +8,9 @@
 - important-email alerts: new unread mail that Claude judges worth a ping;
 - intake (jarvis/intake.py): todos and calendar events picked out of OnQ, email and texts,
   added to Trello and Apple Calendar by themselves;
-- power alerts: the laptop went on battery, is running low, or was plugged back in.
+- power alerts: the laptop went on battery, is running low, or was plugged back in;
+- phone battery alerts: the owner's iPhone (Find My on the Mac VM, jarvis/tools/findmy.py) is
+  down to PHONE_WARN_AT percent and not charging. These are also spoken, from 8 am to 10 pm.
 
 What was already sent is kept in data/proactive.json, so a restart doesn't repeat anything.
 Reminders that would land after 10 pm (work due at 11:59 PM) go out at 10 pm instead.
@@ -27,7 +29,7 @@ from pathlib import Path
 import anthropic
 
 from jarvis import config, intake, notify
-from jarvis.tools import gmail, icloud_calendar, onq, sheets, trello, weather
+from jarvis.tools import dnd, findmy, gmail, icloud_calendar, onq, sheets, trello, weather
 from jarvis.tools.clock import TZ
 
 log = logging.getLogger(__name__)
@@ -56,6 +58,9 @@ SOLOIST_LIFETIME = timedelta(days=90)  # builds stop working 90 days after their
 SOLOIST_WARN_BEFORE = [14, 3]  # days
 SOLOIST_EVERY = 6 * 60 * 60  # seconds between build-expiry checks
 BATTERY_WARN_AT = [20, 10]  # percent
+PHONE_EVERY = 5 * 60  # seconds between phone battery checks
+PHONE_REARM_ABOVE = 5  # points over a warning level (or charging) before it can warn again
+PHONE_SPOKEN_HOURS = range(8, 22)  # phone alerts are also said out loud at home in these hours
 ALL_DAY_TIME = 9  # an all-day deadline counts as due at 9 am for reminders
 LATEST_REMINDER_HOUR = 22  # a reminder that would go out later (e.g. for 11:59 PM work) goes at 10 pm
 
@@ -278,6 +283,26 @@ def check_power(state, now):
     state["power"], state["battery_warned"] = "battery", sorted(warned | set(due))
 
 
+def check_phone(state, now):
+    b = findmy.battery()
+    if b is None:
+        return
+    warned = set(state.get("phone_warned", []))
+    if b["charging"]:
+        warned = set()
+    else:
+        warned = {w for w in warned if b["percent"] <= w + PHONE_REARM_ABOVE}
+        due = [w for w in config.PHONE_WARN_AT if b["percent"] <= w and w not in warned]
+        if due:
+            text = f"Sir, your phone is at {b['percent']}% and isn't charging."
+            notify.post(f"\U0001faab {text}")
+            if (now.hour in PHONE_SPOKEN_HOURS and notify.available("voice")
+                    and not dnd.active()):
+                notify.send("voice", text)
+            warned |= {w for w in config.PHONE_WARN_AT if b["percent"] <= w}
+    state["phone_warned"] = sorted(warned)
+
+
 # --- Spotify speaker ------------------------------------------------------------------------
 
 def soloist_expiry():
@@ -372,6 +397,7 @@ def run():
         state, now = _load(), datetime.now(TZ)
         for name, check, every in (("briefing", check_briefing, 0),
                                    ("power", check_power, 0),
+                                   ("phone", check_phone, PHONE_EVERY),
                                    ("soloist", check_soloist, SOLOIST_EVERY),
                                    ("reminders", check_reminders, REMINDER_EVERY),
                                    ("onq", check_onq, ONQ_EVERY),
@@ -393,7 +419,7 @@ def start():
 
 
 if __name__ == "__main__":
-    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|email|intake]
+    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|email|intake|phone]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
     import sys
     now = datetime.now(TZ)
@@ -418,6 +444,8 @@ if __name__ == "__main__":
         print(_claude(EMAIL_JUDGE.format(contacts=_contact_names()), listing, 600) if emails else "No unread email.")
         for e in emails:
             print(e["id"], "|", e["from"], "|", e["subject"])
+    elif what == "phone":
+        print(findmy.battery())
     elif what == "intake":
         new, picks = intake.preview(_load(), now)
         print("New:", json.dumps(new))
