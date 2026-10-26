@@ -28,6 +28,7 @@ function jarvis {
         }
         $colours = $env:COLORTERM
         $env:COLORTERM = 'truecolor'  # Windows Terminal does 24-bit colour
+        $env:JARVIS_HYDE = $JarvisHyde  # /jarvis settings reaches Jarvis's settings over ssh
         try { & $python -X utf8 -I (Join-Path $JarvisWindow 'launch.py') @args }
         finally { $env:COLORTERM = $colours }
         return
