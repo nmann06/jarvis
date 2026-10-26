@@ -116,14 +116,14 @@ def _float(blocks):
     return np.concatenate(blocks).astype(np.float32) / 32768
 
 
-def record_utterance(mic, transcribe, wait_seconds=5.0, preroll=()):
+def record_utterance(mic, transcribe, wait_seconds=5.0, preroll=(), max_seconds=None):
     """Record from mic until the speaker stops. Returns an Utterance, or None if nobody spoke.
 
     transcribe(audio) -> text is used to transcribe during pauses, so the text is ready the
     moment the speaker is done. wait_seconds is how long to wait for speech to start; after
     that, recording ends once there has been SILENCE_SECONDS of quiet (QUICK_SILENCE_SECONDS
-    if what was said so far sounds finished), or at MAX_UTTERANCE_SECONDS. preroll blocks
-    (already heard) go at the front of the recording.
+    if what was said so far sounds finished), or at max_seconds (MAX_UTTERANCE_SECONDS if not
+    given). preroll blocks (already heard) go at the front of the recording.
     """
     # Only new blocks are judged, so the tail of "Jarvis" in the preroll can't count as the
     # request starting. Time is counted in blocks rather than by the clock.
@@ -159,7 +159,7 @@ def record_utterance(mic, transcribe, wait_seconds=5.0, preroll=()):
                     and not early.exception() and sounds_finished(early.result()[0])):
                 endpoint = "quick"
                 break
-        if len(new) * block_seconds >= config.MAX_UTTERANCE_SECONDS:
+        if len(new) * block_seconds >= (max_seconds or config.MAX_UTTERANCE_SECONDS):
             break
     # early, if any, covers everything said: only quiet has come in since it started. (Cut off
     # mid-speech at MAX_UTTERANCE_SECONDS there is none, and it is all transcribed afterwards.)

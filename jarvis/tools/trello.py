@@ -38,6 +38,9 @@ def _board(name):
 
 
 def _list(board, name):
+    """The list called name on board, or the board's first list if name is empty."""
+    if not name.strip():
+        return board["lists"][0]
     for l in board["lists"]:
         if l["name"].strip().lower() == name.strip().lower():
             return l
@@ -101,19 +104,22 @@ def trello_cards(board, list):
     return out or "No cards."
 
 
-@tool("Add a card to a Trello list.",
+@tool("Add a card to a Trello list. Unless the owner names another board or list, leave both "
+      "empty (their todo list) and don't ask which.",
       board=BOARD,
-      list={"type": "string", "description": "List name, e.g. 'todo'"},
+      list={"type": "string", "description": "List name, or empty for the board's first list "
+            "('todo' on the main board)"},
       title={"type": "string"},
       due={"type": "string", "description": "Due date as YYYY-MM-DD or YYYY-MM-DD HH:MM "
            "(local time), or empty for none"})
 def trello_add_card(board, list, title, due):
     b = _board(board)
-    params = {"idList": _list(b, list)["id"], "name": title, "pos": "bottom"}
+    l = _list(b, list)
+    params = {"idList": l["id"], "name": title, "pos": "bottom"}
     if due:
         params["due"] = _due(due)
     _send("POST", "/cards", **params)
-    return f"Added {title!r} to {b['name']} / {_list(b, list)['name']}."
+    return f"Added {title!r} to {b['name']} / {l['name']}."
 
 
 @tool("Move a Trello card to another list on the same board.",
