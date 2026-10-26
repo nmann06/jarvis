@@ -277,16 +277,35 @@ def _word_list(text):
     return re.sub(r"[^a-z' ]+", " ", text.lower()).split()
 
 
+_NUMBER_WORDS = {"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+                 "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+                 "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty",
+                 "hundred", "thousand", "first", "second", "third", "fifth", "percent"}
+
+
+def _numbers(text):
+    """Whisper writes numbers as digits ("two thirty" -> "2.30"), which _word_list drops."""
+    return re.findall(r"\d+(?:[.:,]\d+)*", text)
+
+
 def _is_echo(clip, reply):
     """Whether a stop Vosk heard (clip, just the stop phrase) was really Jarvis's own voice
     getting past the canceller (Vosk heard "but it stays" as "stop"). Whisper hears words far
     better: if it hears no stop word there, but mostly words from reply, it was echo."""
-    words = _word_list(stt.transcribe(clip.astype(np.float32) / 32768))
+    text = stt.transcribe(clip.astype(np.float32) / 32768)
+    words = _word_list(text)
     if _STOP_WORDS & set(words):
         return False
     if "jarvis" in words and "jarvis" not in _word_list(reply):
         return False  # the owner's "Jarvis, stop": Jarvis doesn't say its own name
-    echoed = [w for w in words if w in set(_word_list(reply))]
+    reply_words = set(_word_list(reply))
+    echoed = [w for w in words if w in reply_words]
+    # Echoed "tomorrow at two thirty" came out as "2.30": a number counts as echo when the
+    # reply has numbers in it, as digits or spoken.
+    numbers = _numbers(text)
+    words += numbers
+    if _numbers(reply) or reply_words & _NUMBER_WORDS:
+        echoed += numbers
     # Half will do: "Thampon" echoed came out as "the stamp".
     if words and len(echoed) * 2 >= len(words):
         log.info("heard a stop, but Whisper heard %r, my own words: ignored", " ".join(words))
