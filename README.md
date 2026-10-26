@@ -347,6 +347,14 @@ opens the same conversation in plain Claude Code (for its own screens like `/plu
 `/login`), coming back when you exit it. Permission dialogs also run the `Notification` hooks,
 which headless Claude Code skips, so the alerts above still say when it's waiting on you.
 
+`/jarvis settings` opens Jarvis's own settings (this repo's `.env`, and do not disturb) on a
+page of their own: categories along the top (←/→), typing searches all of them, Enter changes
+one, Delete puts it back to its default, and ctrl+r (or Enter when asked on leaving) restarts
+Jarvis to apply them. On the Windows laptop it reaches hyde over ssh (`JARVIS_HYDE`, set by
+`jarvis`). Links in replies open in the browser, or over ssh, where nothing can open on your
+screen, are copied to the clipboard with a note in the footer. `/btw` asks a side question
+about the conversation without adding to it, as in Claude Code.
+
 It lives in its own repo, [jarvis-wrapper](https://github.com/nmann06/jarvis-wrapper), cloned
 to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 
