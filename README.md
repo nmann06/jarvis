@@ -478,6 +478,18 @@ next two days, new texts and flagged emails; the time and weather when there's l
 every light, answered without Claude, and a bare "Hey Jarvis, lights" toggles them (all off if
 any is on, else all on); anything that names a switch or asks about them goes to Claude as before.
 
+## Phone battery
+
+
+
+
+
+10% (`PHONE_WARN_AT`) while not charging it posts in #jarvis, and says it out loud too from
+8 am to 10 pm unless do not disturb is on. It warns again once the phone has charged.
+`phone_battery` lets Claude answer "what's my phone battery at?". The phone is your own iPhone
+
+
+
 ## Do not disturb
 
 "Hey Jarvis, do not disturb" (or "DND on", in Discord too) and Jarvis says nothing out loud
