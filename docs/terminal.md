@@ -63,5 +63,14 @@ Already set up: `~/.bashrc` has the `jarvis` command (open a new terminal, or `s
 
 The window wants a terminal with 24-bit colour and the mouse (Windows Terminal has both). Hold
 Shift while dragging to select text the terminal's own way; a plain drag selects inside the
-window, and ctrl+c copies it. Alt+Enter is Windows Terminal's full-screen key, so use `\`+Enter
-or ctrl+j for a new line in a prompt.
+window, and ctrl+c copies it. `\`+Enter or ctrl+j start a new line in a prompt (Alt+Enter is
+Windows Terminal's full-screen key).
+
+Shift+Enter starts a new line too, once Windows Terminal is told to send it as one: by itself it
+sends a plain Enter, so the window can't tell the two apart (locally or over ssh). In Windows
+Terminal, Settings (ctrl+,) > Open JSON file (bottom left), and add this to the `"actions"` list:
+
+    { "command": { "action": "sendInput", "input": "\n" }, "keys": "shift+enter" },
+
+Save, and it applies straight away. It sends what ctrl+j sends, in every tab, so Claude Code
+gets a new line from Shift+Enter as well.
