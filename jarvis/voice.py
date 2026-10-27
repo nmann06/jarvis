@@ -18,7 +18,7 @@ import numpy as np
 import sounddevice as sd
 
 from jarvis import (alarms, audio, clap, config, homecoming, latency, learn, llm, notify, project,
-                    stt, tools, tts)
+                    routines, stt, tools, tts)
 from jarvis.tools import dnd, imessage, kasa, spotify
 from jarvis.tools.clock import TZ
 from jarvis.wakeword import WakeWord
@@ -595,6 +595,18 @@ def _answer(mic, brain, utterance, follow_up, turn):
         turn.outcome = "continued" if done else "stopped"
         return done
     _unfinished = None  # a new request: whatever was cut off before is dropped
+    # Goodnight and good morning (jarvis.routines): not in the follow-up window, where it may
+    # be said to someone else.
+    if not follow_up and (routine := routines.request(text)) is not None:
+        if routine == "night":
+            return _goodnight(mic, turn)
+        turn.outcome = "good morning"
+        if alarms.ringing():  # "Hey Jarvis, good morning" over the alarm: off, then good morning
+            alarms.stop()
+            routines.pending.set()  # the voice loop runs it once the alarm has stopped
+            return False
+        _good_morning(mic)
+        return False
     # Not in the follow-up window, where it may be someone else asking: Claude judges that.
     # Lights on or off is the same request whoever says it.
     if (on := dnd.request(text)) is not None:
@@ -686,6 +698,46 @@ def _end_project(mic, p, turn):
     log.info("jarvis (project %s): %s", p.slug, reply)
     mic.clear()
     return False
+
+
+def _goodnight(mic, turn):
+    """Lights off, "Goodnight, sir" and when the alarm is, then do not disturb on. No
+    follow-up window."""
+    global _last_reply
+    reply = routines.goodnight("voice")
+    log.info("goodnight (local): %s", reply)
+    with _speaker:
+        _speak(mic, [reply], timing=turn)
+    dnd.set_dnd(True)  # after saying it: with do not disturb on, it would only be posted
+    mic.clear()
+    _last_reply = turn.reply = reply
+    turn.outcome = "goodnight"
+    return False
+
+
+def _good_morning(mic):
+    """The good morning routine (jarvis.routines): do not disturb off, lights on, good
+    morning and the briefing. "Stop" cuts the talking short."""
+    said, stopped = [], False
+
+    def speak(texts):
+        global _last_reply
+        nonlocal stopped
+        if stopped or not texts:
+            return not stopped
+        with _speaker:
+            _, stopped = _speak(mic, texts)
+        said.extend(texts)
+        _last_reply = " ".join(said)
+        mic.clear()
+        return not stopped
+
+    spotify.duck(True)
+    try:
+        routines.good_morning(speak)
+    finally:
+        spotify.duck(False)
+        mic.clear()
 
 
 def _speak_updates(mic):
@@ -826,6 +878,7 @@ def run():
     tts.get_voice()
     _stop_recognizer()
     notify.register("voice", say)
+    alarms.on_stop.append(routines.alarm_stopped)  # a morning alarm turned off: good morning
     spotify.duck(False)  # music left turned down by a crash comes back up
     # Double claps (then "Daddy's home") need no wake word: the detector hears every block.
     claps = clap.ClapDetector() if config.HOMECOMING else None
@@ -839,12 +892,16 @@ def run():
             for listener in listeners:
                 listener.reset()  # the mic was read elsewhere since: what came before doesn't count
             score = wake.wait(mic, interrupt=lambda: (alarms.ringing()
+                                                      or routines.pending.is_set()
                                                       or not project.speech.empty()),
                               # A list, not a generator: every listener must hear every block.
                               also=listeners and (lambda block: any([listener.heard(block)
                                                                      for listener in listeners])))
             if score is None and alarms.ringing():
                 _alarm_mode(mic, wake, brain)
+                continue  # a morning alarm turned off: good morning, next time round
+            if score is None and routines.pending.is_set():
+                _good_morning(mic)
                 continue
             if score is None and (fired := next((s for s in silent if s.fired), None)):
                 if mic.captured < _alert_until:

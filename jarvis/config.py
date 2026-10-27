@@ -48,7 +48,10 @@ MCP_PORT = int(os.getenv("MCP_PORT", "8766"))
 ICLOUD_USER =os.getenv("ICLOUD_USER", "")  # Apple ID email
 ICLOUD_APP_PASSWORD = os.getenv("ICLOUD_APP_PASSWORD", "")  # app-specific password, not the real one
 ICLOUD_CALENDAR = os.getenv("ICLOUD_CALENDAR", "Jarvis")  # default calendar for new events
-BRIEFING_HOUR = int(os.getenv("BRIEFING_HOUR", "8"))  # morning briefing posted in #jarvis
+# The morning briefing is put together (and posted in #jarvis) at BRIEFING_TIME, or
+# BRIEFING_BEFORE_ALARM minutes before a morning alarm if that's earlier (jarvis/routines.py)
+BRIEFING_TIME = os.getenv("BRIEFING_TIME", "7:45")
+BRIEFING_BEFORE_ALARM = int(os.getenv("BRIEFING_BEFORE_ALARM", "15"))
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")  # job-search sheet, from its URL
 TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/authorize

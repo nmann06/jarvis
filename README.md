@@ -490,6 +490,26 @@ next two days, new texts and flagged emails; the time and weather when there's l
 every light, answered without Claude, and a bare "Hey Jarvis, lights" toggles them (all off if
 any is on, else all on); anything that names a switch or asks about them goes to Claude as before.
 
+## Goodnight and good morning
+
+`jarvis/routines.py`, answered without Claude (in Discord too, without the talking):
+
+- **"Hey Jarvis, goodnight"** (or "I'm going to bed"): the lights go off, Jarvis says goodnight
+  and when your alarm is (or that none is set), then do not disturb goes on until the morning.
+- **Good morning** starts when you turn off a morning alarm (4 am to noon, once a day; a snooze
+  or an alarm that rings out doesn't count), or whenever you say "Hey Jarvis, good morning":
+  do not disturb goes off, the lights come on one by one, Jarvis says good morning and the time,
+  then reads out the briefing: the weather and what to wear, your first class, whether there's
+  a lab today and when (the three-hour classes in Beamish-Munro), other events, tests in the
+  next week and work due in the next three days, and important email. "Stop" cuts it short.
+- **The briefing** is put together once a day, at `BRIEFING_TIME` (7:45) or
+  `BRIEFING_BEFORE_ALARM` (15) minutes before the first alarm from 4 am on, whichever is
+  earlier. The written one is posted in #jarvis right away; the spoken one (written by Sonnet,
+  which keeps to what's there) is kept with it in `data/briefing.json` for when the alarm goes
+  off, so nothing is looked up twice. If there's none yet when you say good morning, it's put
+  together (and posted) then. `python -m jarvis.proactive briefing` prints both without
+  posting.
+
 ## Phone battery
 
 Every 5 minutes Jarvis reads your iPhone's battery from Find My on the Mac VM (signed in to

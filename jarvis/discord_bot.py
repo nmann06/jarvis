@@ -11,7 +11,7 @@ import logging
 
 import discord
 
-from jarvis import alarms, config, llm, notify, project
+from jarvis import alarms, config, llm, notify, project, routines
 from jarvis.tools import dnd
 
 log = logging.getLogger(__name__)
@@ -108,6 +108,11 @@ class JarvisBot(discord.Client):
         if (on := dnd.request(text)) is not None:  # without Claude, as by voice
             reply = await loop.run_in_executor(None, dnd.set_dnd, on)
             log.info("discord jarvis (do not disturb, local): %s", reply)
+            await message.channel.send(reply)
+            return
+        if (routine := routines.request(text)) is not None:  # goodnight, good morning
+            reply = await loop.run_in_executor(None, routines.written, routine)
+            log.info("discord jarvis (%s routine, local): %s", routine, reply)
             await message.channel.send(reply)
             return
         # Alarms are handled without Claude (jarvis.alarms), as by voice.
