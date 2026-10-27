@@ -122,8 +122,10 @@ SETTINGS = [
       "Jarvis answers everything here and posts alerts here"),
     S("DISCORD_MENTION", "Discord", "@mention in alerts", "bool", "on", "Ping you in alerts"),
     # Calendar & briefing
-    S("BRIEFING_HOUR", "Calendar & briefing", "Morning briefing hour", "int", "8",
-      "Hour (0-23) the morning briefing is posted"),
+    S("BRIEFING_TIME", "Calendar & briefing", "Morning briefing at", "text", "7:45",
+      "When the briefing is prepared and posted (H:MM), unless an alarm makes it earlier"),
+    S("BRIEFING_BEFORE_ALARM", "Calendar & briefing", "Before a morning alarm (minutes)", "int",
+      "15", "Prepared this long before a morning alarm, if that's before the time above"),
     S("ICLOUD_CALENDAR", "Calendar & briefing", "Default calendar", "text", "Jarvis",
       "Apple calendar new events go in"),
     # Services
@@ -212,6 +214,10 @@ def _check(s, value):
         # Other model ids and Whisper models work too: allow anything without spaces.
         if not re.fullmatch(r"[\w.\-/]+", value.strip()):
             raise ValueError(f"{s['label']}: one of {', '.join(s['choices'])}")
+    if s["key"] == "BRIEFING_TIME":
+        m = re.fullmatch(r"(\d{1,2}):(\d\d)", value.strip())
+        if not m or int(m[1]) > 23 or int(m[2]) > 59:
+            raise ValueError(f"{s['label']}: a time like 7:45 (24-hour)")
     if "\n" in value:
         raise ValueError("One line only")
     return value.strip()

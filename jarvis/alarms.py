@@ -206,6 +206,9 @@ def set_default_sound(name):
 _ringing = None  # while an alarm rings: {"alarm", "stop" Event, "hush" Event, "proc"}
 _wake = threading.Event()  # the scheduler looks again now (an alarm was added)
 on_ring = []  # functions called (from the alarm thread) when an alarm starts ringing
+# Functions called with the alarm (from the alarm thread) when the owner turns it off; not when
+# it's snoozed or rings out. Called before ringing() turns False.
+on_stop = []
 
 
 def ringing():
@@ -235,7 +238,10 @@ def stop():
 def snooze():
     """Turn off the ringing alarm and set it again SNOOZE_MINUTES from now."""
     r = _ringing
-    if not r or not stop():
+    if not r:
+        return None
+    r["snoozed"] = True
+    if not stop():
         return None
     return add(datetime.now(TZ) + timedelta(minutes=SNOOZE_MINUTES), r["alarm"]["sound"])
 
@@ -318,6 +324,12 @@ def ring(alarm):
         if r.get("proc"):
             r["proc"].kill()
             r["proc"].wait()
+        if r.get("stopped_by_owner") and not r.get("snoozed"):
+            for fn in on_stop:
+                try:
+                    fn(alarm)
+                except Exception:
+                    log.exception("alarm %d: an on_stop function failed", alarm["id"])
         _ringing = None
         spotify.duck(False)
         restore()
