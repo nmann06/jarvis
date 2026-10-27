@@ -330,9 +330,9 @@ ctrl+o shows it), tool calls with diffs and folded output, permission dialogs, A
 plan approval, the task list, subagents, queued prompts and the context left; the footer also
 always shows plan usage (5-hour, with when it resets, and weekly), the model and effort. The keys are
 Claude Code's: shift+tab switches mode (default, accept edits, plan, auto), esc interrupts,
-`\`+enter or ctrl+j adds a line, ctrl+x s sends now (stopping the turn in progress instead of
-queueing), up and down go through past prompts (shared with Claude Code), left on an empty
-prompt lists every saved conversation from every folder (resuming one moves the window to its
+shift+enter (in Windows Terminal, once set up as in docs/terminal.md), `\`+enter or ctrl+j
+adds a line, ctrl+x s sends now (stopping the turn in progress instead of queueing), up and
+down go through past prompts (shared with Claude Code), left on an empty prompt lists every saved conversation from every folder (resuming one moves the window to its
 folder),
 `/` lists commands, `@` files, `!` runs a shell command, ctrl+c twice quits. Commands Claude Code
 runs headless (`/compact`, `/context`, `/model`, `/effort`, `/clear`, skills) go straight to it.
