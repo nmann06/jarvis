@@ -543,6 +543,107 @@ def _count(n, channel):
     return _number(n) if channel == "voice" and n < 60 else str(n)
 
 
+# --- The first event of the day -----------------------------------------------------------
+# A morning alarm should be BEFORE_FIRST_EVENT minutes or more before the day's first event
+# that isn't a class. The calendar is a nicety: if it doesn't answer quickly, nothing is said.
+
+BEFORE_FIRST_EVENT = config.ALARM_BEFORE_FIRST_EVENT  # minutes
+CALENDAR_TIMEOUT = 6  # seconds to wait for the calendar before giving up on the warning (the
+# first call after a restart took over 4 s)
+_SECTION = re.compile(r"\b([A-Z]{3,4} \d{3}[A-Z]?) \d{3}\b")  # "ELEC 353 003" -> "ELEC 353"
+
+
+def first_event(day):
+    """The first event on day (a date) the owner has to be at, or None. Lectures and tutorials
+    (Classes other than labs), all-day events and due-work entries ("Lab report due") don't
+    count; tests do. None too if the calendar fails or takes over CALENDAR_TIMEOUT seconds."""
+    from concurrent.futures import ThreadPoolExecutor
+    from jarvis import proactive
+    from jarvis.tools import icloud_calendar
+    start = datetime(day.year, day.month, day.day, tzinfo=TZ)
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        found = pool.submit(icloud_calendar.events, start, start + timedelta(days=1)
+                            ).result(timeout=CALENDAR_TIMEOUT)
+    except Exception as e:  # includes the timeout
+        log.warning("first event of %s: no calendar (%s)", day, repr(e))
+        return None
+    finally:
+        pool.shutdown(wait=False)  # a lookup still going carries on without us
+    counted = [e for e in found
+               if isinstance(e["start"], datetime) and e["start"].date() == day
+               and (e["calendar"] != "Classes" or proactive.is_lab(e))
+               and not _due_marker(e)]
+    return min(counted, key=lambda e: e["start"], default=None)
+
+
+def _due_marker(event):
+    """A due-work entry ("Lab report due", or one with no length), not something to be at; a
+    "Project meeting" with a length still counts."""
+    from jarvis import proactive
+    return proactive.deadline_kind(event) == "work" and (
+        re.search(r"\bdue\b", event["title"], re.I) is not None
+        or not event["end"] or event["end"] <= event["start"])
+
+
+def morning_alarm(day):
+    """The earliest alarm on day (a date) that is meant to wake the owner (4 am to noon), or
+    None."""
+    from jarvis import proactive
+    return next((a for a in alarms() if a["at"].date() == day
+                 and proactive.MORNING_FROM <= a["at"].hour < proactive.BRIEFING_LATEST_HOUR), None)
+
+
+def too_late(alarm_at, event):
+    return event["start"] - alarm_at < timedelta(minutes=BEFORE_FIRST_EVENT)
+
+
+def _clock(at, channel):
+    from jarvis.voice import clock_words
+    return clock_words(at) if channel == "voice" else f"{at:%-I:%M %p}"
+
+
+def event_name(event, channel):
+    """"ELEC 353 lab" (spoken: "ELEC three fifty three lab"): the course without its section,
+    and a lab from the Classes calendar called a lab."""
+    from jarvis import proactive
+    name = _SECTION.sub(r"\1", event["title"])
+    if proactive.is_lab(event) and not re.search(r"\blab\b", name, re.I):
+        name += " lab"
+    if channel == "voice":
+        from jarvis.voice import _number
+
+        def spoken(m):  # 353 -> "three fifty three", 301 -> "three oh one"
+            rest = int(m[1][1:])
+            tail = "hundred" if not rest else f"oh {_number(rest)}" if rest < 10 else _number(rest)
+            return f"{_number(int(m[1][0]))} {tail}"
+        name = re.sub(r"\b(\d{3})\b", spoken, name)
+    return name
+
+
+def heads_up(alarm_at, event, channel):
+    """The warning that an alarm at alarm_at is too close to (or after) the start of event."""
+    n = BEFORE_FIRST_EVENT
+    span = "half an hour" if n == 30 else "an hour" if n == 60 else f"{_count(n, channel)} minutes"
+    then = ("so that's after it starts" if alarm_at >= event["start"]
+            else f"so that's less than {span} before it")
+    return (f"Heads up, sir: your {event_name(event, channel)} starts at "
+            f"{_clock(event['start'], channel)}, {then}.")
+
+
+def alarm_warning(alarm, now, channel):
+    """What to add to the reply to setting alarm (a dict from add), or "": the heads-up if it is
+    the day's first morning alarm and too close to the day's first event. The owner is already up
+    for an alarm under an hour away, so those aren't checked."""
+    morning = morning_alarm(alarm["at"].date())
+    if morning is None or morning["id"] != alarm["id"] or alarm["at"] - now < timedelta(minutes=60):
+        return ""
+    event = first_event(alarm["at"].date())
+    if event and too_late(alarm["at"], event):
+        return f" {heads_up(alarm['at'], event, channel)}"
+    return ""
+
+
 def _sound_in(n):
     for word in n.split():
         if word in _SOUND_NAMES:
@@ -626,7 +727,7 @@ def _set(at, sound_name, now, channel):
     if at - now < timedelta(minutes=60) and channel == "voice":
         minutes = max(1, round((at - now).total_seconds() / 60))
         reply += f". That's in {_count(minutes, channel)} minute{'s' if minutes != 1 else ''}"
-    return reply + "."
+    return reply + "." + alarm_warning(alarm, now, channel)
 
 
 def _cancel(n, now, channel, answering=False):

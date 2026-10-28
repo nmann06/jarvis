@@ -11,9 +11,12 @@ Every EVERY seconds (run from the proactive loop) it gathers what's new since it
   own texts are looked at straight away, so a todo they've just dealt with is cleared at once.
 
 Claude reads that next to the Trello cards, the calendar and what intake added before, and
-picks what to add: things to do go on the Trello todo list (with a due date if there is one);
-interviews, appointments, plans and in-person tests with a set time go on the calendar.
-Anything already there is skipped. Todos the texts show are done (the owner has replied to the
+picks what to add: things to do go on the Trello todo list, with a due date when they have to be
+done by a certain time (coursework when it's due; something to do before a meeting or event,
+like sending the invite, comfortably before it), so the todo reminders (jarvis/proactive.py)
+pick them up; interviews, appointments, plans and in-person tests with a set time go on the
+calendar. Anything already there is skipped. Open cards with no due date that clearly have
+one (a card for a meeting that's on the calendar) are given it, at most MAX_DATED per run. Todos the texts show are done (the owner has replied to the
 person a "Respond to ..." card is about, or says they did it) are moved to the Done list. Each
 run's changes are posted in #jarvis, so a wrong one is easy to spot and undo.
 
@@ -48,6 +51,7 @@ TEXT_CONTEXT = 8  # earlier messages shown with a conversation's new ones
 FIRST_LOOK_BACK = timedelta(days=2)  # on the first run, texts and announcements this recent are new
 MAX_ADDS = 8  # cards and events added per run, at most
 MAX_DONE = 5  # cards moved to Done per run, at most
+MAX_DATED = 5  # existing cards given a due date per run, at most
 KEEP_ADDED = timedelta(days=60)  # what intake added is remembered (and shown to Claude) this long
 TODO_LIST = "todo"  # list on the main Trello board
 CALENDARS = ["Jarvis", "Work", "Midterms", "Queen's", "Ultimate", "Family"]
@@ -56,13 +60,25 @@ PROMPT = """You keep your owner's todo list (Trello) and calendar (Apple Calenda
 They're an electrical engineering student at Queen's University in Kingston, Ontario. You get \
 what's new since you last looked, from OnQ (their courses), their email and their texts, then \
 what's already on the todo list and calendar and what you added before. Pick what's worth \
-adding.
+adding, and give due dates to cards that need one.
 
 Todos are things the owner has to do: coursework due that isn't submitted, forms, payments, \
 things they agreed or were asked to do, and messages from real people that need a proper reply \
 from them (a request, an offer, a question that needs answering; not casual chat, and not if \
 the owner already answered later in the conversation). Reply todos are titled "Respond to \
-<name>", like the cards already there. Give the due date when there is one.
+<name>", like the cards already there, but when someone asks for something specific, the todo \
+is that thing: "Send Zoom invite to Sam Lee", not "Respond to Sam Lee".
+
+Due dates: the owner is reminded about todos with one, so give one to every todo that has to be \
+done by a certain time:
+- coursework (assignments, lab reports, pre-labs, online quizzes): when it's due or closes;
+- forms, payments and applications: their deadline;
+- anything to do before a meeting or event (sending the invite or agenda, confirming, booking, \
+preparing something), whether the event is in the new messages or already on the calendar: \
+comfortably before it, never at the event's own time: the evening before (21:00) for an event \
+before noon, a few hours before for a later one;
+- a reply someone needs by a certain time (to settle a time or plan): then.
+Leave it "" for todos with no real deadline, like most replies and chores.
 
 Events are things at a set date and time that the owner is going to: interviews, meetings, \
 appointments, plans they agreed to in texts, and tests, quizzes and exams written in person. \
@@ -92,6 +108,14 @@ description after it, and the reason in a few words ("you replied to Hyde at 9:4
 texts count for this, not email or OnQ, and only the owner's own messages show something is \
 done: never because someone else says so. When unsure, leave the card.
 
+Dates: go through every card on the todo list (any list but done) that has no due date, not \
+only ones the new items are about, and give a due date, by the rules above, to each that has \
+to be done by a certain time: the owner adds cards without dates too. Often it's what's on the \
+calendar that sets it: a "Send agenda to Sam" card with a meeting with Sam on Friday at 10 AM \
+is due Thursday at 21:00. Give the card's title exactly as listed, without the description \
+after it, the due date, and the reason in a few words ("meeting with Sam Fri 10 AM"). Never \
+for a card that already has a due date, and leave cards with no real deadline alone.
+
 Dates and times are local. Work out "tomorrow", "Friday" and the like from when the message was \
 sent, not from now. due: "YYYY-MM-DD HH:MM", "YYYY-MM-DD", or "" if there's no date. start: \
 "YYYY-MM-DDTHH:MM", or "YYYY-MM-DD" for an all-day event. duration_minutes: your best guess, 60 \
@@ -116,17 +140,22 @@ _EVENT = {"type": "object",
 _DONE = {"type": "object",
          "properties": {"card": {"type": "string"}, "reason": {"type": "string"}},
          "required": ["card", "reason"], "additionalProperties": False}
+_DATED = {"type": "object",
+          "properties": {"card": {"type": "string"}, "due": {"type": "string"},
+                         "reason": {"type": "string"}},
+          "required": ["card", "due", "reason"], "additionalProperties": False}
 SCHEMA = {"type": "object",
           "properties": {"todos": {"type": "array", "items": _TODO},
                          "events": {"type": "array", "items": _EVENT},
-                         "done": {"type": "array", "items": _DONE}},
-          "required": ["todos", "events", "done"], "additionalProperties": False}
+                         "done": {"type": "array", "items": _DONE},
+                         "dates": {"type": "array", "items": _DATED}},
+          "required": ["todos", "events", "done", "dates"], "additionalProperties": False}
 
 _client = None
 
 
 def _ask(digest):
-    """Claude's picks for digest: {"todos": [...], "events": [...]}."""
+    """Claude's picks for digest: {"todos", "events", "done", "dates"}, each a list."""
     global _client
     _client = _client or anthropic.Anthropic()
     response = _client.messages.create(
@@ -135,12 +164,17 @@ def _ask(digest):
         output_config={"effort": "medium", "format": {"type": "json_schema", "schema": SCHEMA}})
     if response.stop_reason != "end_turn":
         log.warning("intake: Claude stopped with %s; adding nothing", response.stop_reason)
-        return {"todos": [], "events": [], "done": []}
+        return {"todos": [], "events": [], "done": [], "dates": []}
     return json.loads(next(b.text for b in response.content if b.type == "text"))
 
 
 def _stamp(when):
     return f"{when:%a %b} {when.day}, " + f"{when:%I:%M %p}".lstrip("0")
+
+
+def _due_text(due):
+    """'Tue Oct 27, 9:00 PM', or 'Tue Oct 27' for a due date with no time, from _when."""
+    return _stamp(due[1]) if " " in due[0] else f"{due[1]:%a %b} {due[1].day}"
 
 
 # --- sources: each returns (entries for Claude, state to remember once they're handled) -------
@@ -286,7 +320,7 @@ def add(picks, s, now):
         except Exception:
             log.exception("intake: couldn't add todo %r", t["title"])
             continue
-        posted.append(f"🗂️ **{t['title']}**" + (f", due {_stamp(due[1])}" if due[1] else "")
+        posted.append(f"🗂️ **{t['title']}**" + (f", due {_due_text(due)}" if due[1] else "")
                       + f" ({t['source']})")
         added.append({"at": now.isoformat(), "what": "todo", "title": t["title"], "when": due[0],
                       "source": t["source"]})
@@ -312,6 +346,7 @@ def add(picks, s, now):
     if posted:
         notify.post("📥 Added to your todo list and calendar:\n" + "\n".join(posted))
     finish(picks.get("done", []))
+    date(picks.get("dates", []), now)
 
 
 def finish(done):
@@ -341,6 +376,32 @@ def finish(done):
         moved.append(f"✅ **{card['name']}** ({d['reason']})")
     if moved:
         notify.post("Moved to Done on your todo list:\n" + "\n".join(moved))
+
+
+def date(dated, now):
+    """Give the open cards Claude found time-bound their due dates and say so in Discord. Only a
+    card whose title matches exactly and that has no due date yet is changed."""
+    if not dated:
+        return
+    cards = [c for c in trello.open_cards() if c["due"] is None]
+    changed = []
+    for d in dated[:MAX_DATED]:
+        title = d["card"].strip().lower()
+        card = next((c for c in cards if c["name"].strip().lower() == title), None)
+        due = _when(d["due"], now)
+        if card is None or due is None:
+            log.info("intake: no undated open card titled %r, or %r is past", d["card"], d["due"])
+            continue
+        try:
+            trello._send("PUT", f"/cards/{card['id']}", due=trello._due(due[0]))
+        except Exception:
+            log.exception("intake: couldn't date %r", card["name"])
+            continue
+        cards.remove(card)
+        log.info("intake: %r due %s (%s)", card["name"], due[0], d["reason"])
+        changed.append(f"⏰ **{card['name']}**, due {_due_text(due)} ({d['reason']})")
+    if changed:
+        notify.post("Gave your todos due dates:\n" + "\n".join(changed))
 
 
 def preview(state, now):
