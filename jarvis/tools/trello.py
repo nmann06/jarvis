@@ -1,4 +1,4 @@
-"""The owner's Trello todos: list, add, move and finish cards. Finishing = moving to the board's Done list."""
+"""The owner's Trello todos: list, add, move, date and finish cards. Finishing = moving to the board's Done list."""
 
 from datetime import datetime
 
@@ -71,6 +71,21 @@ def _due(text):
     return when.replace(tzinfo=TZ).isoformat()
 
 
+def open_cards(board=""):
+    """The board's open cards that aren't in its Done list or ticked complete: [{"id", "name",
+    "list", "due" (local datetime, or None)}]. A due given as a day only is 11:59 PM."""
+    b = _board(board)
+    lists = {l["id"]: l["name"] for l in b["lists"]}
+    out = []
+    for c in _get(f"/boards/{b['id']}/cards", filter="open", fields="name,idList,due,dueComplete"):
+        where = lists.get(c["idList"], "?")
+        if where.strip().lower() == "done" or c["dueComplete"]:
+            continue
+        due = datetime.fromisoformat(c["due"].replace("Z", "+00:00")).astimezone(TZ) if c["due"] else None
+        out.append({"id": c["id"], "name": c["name"], "list": where, "due": due})
+    return out
+
+
 BOARD = {"type": "string", "description": f"Board name, or empty for the main todo board "
          f"({config.TRELLO_BOARD!r})"}
 
@@ -120,6 +135,19 @@ def trello_add_card(board, list, title, due):
         params["due"] = _due(due)
     _send("POST", "/cards", **params)
     return f"Added {title!r} to {b['name']} / {l['name']}."
+
+
+@tool("Set, change or clear the due date of a Trello card. Jarvis reminds the owner about due "
+      "cards until they're done.",
+      board=BOARD,
+      card={"type": "string", "description": "The card's title, or a distinctive part of it"},
+      due={"type": "string", "description": "Due date as YYYY-MM-DD or YYYY-MM-DD HH:MM "
+           "(local time), or empty for none"})
+def trello_set_due(board, card, due):
+    b = _board(board)
+    c = _card(b, card)
+    _send("PUT", f"/cards/{c['id']}", due=_due(due) or "null")
+    return f"{c['name']!r} is now due {due}." if due else f"{c['name']!r} has no due date now."
 
 
 @tool("Move a Trello card to another list on the same board.",

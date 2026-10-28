@@ -1,4 +1,4 @@
-"""Messages Jarvis starts on its own, posted in #jarvis (never spoken):
+"""Messages Jarvis starts on its own, posted in #jarvis (never spoken, except where said):
 
 - the morning briefing at BRIEFING_TIME (7:45), or BRIEFING_BEFORE_ALARM (15) minutes before a
   morning alarm if that's earlier: today's calendar, weather, deadlines, important email. It's
@@ -7,13 +7,21 @@
 - deadline reminders: tests (quizzes, midterms, exams) 4 days, 2 days, 1 day and 2 hours
   before; assignments, labs and other due work 2 days and 1 day before;
 - OnQ reminders: assignments not yet submitted and OnQ quizzes, 2 days and 1 day before
-  (OnQ calendar events are left out: tests go in the Midterms calendar instead);
+  (OnQ calendar events are left out: tests go in the Midterms calendar instead; work that's
+  also a Trello card with the same course and due time is left to the todo reminders);
+- todo reminders: open Trello cards with a due date (not in Done), at TODO_REMIND_TIMES (9 am
+  and 5 pm) from the day before they're due (two days for coursework), TODO_REMIND_BEFORE
+  (2 hours) before a due with a time, and at those times every day once they're overdue, until
+  they're done. Each round is one message, also said out loud from 8 am to 10 pm unless do not
+  disturb is on. A card for OnQ work that's been submitted isn't reminded, and a card (or a
+  new due date) counts from when this check first sees it;
 - important-email alerts: new unread mail that Claude judges worth a ping;
 - intake (jarvis/intake.py): todos and calendar events picked out of OnQ, email and texts,
-  added to Trello and Apple Calendar by themselves;
+  added to Trello and Apple Calendar by themselves, and due dates for todos that need one;
 - power alerts: the laptop went on battery, is running low, or was plugged back in;
 - phone battery alerts: the owner's iPhone (Find My on the Mac VM, jarvis/tools/findmy.py) is
-  down to PHONE_WARN_AT percent and not charging. These are also spoken, from 8 am to 10 pm.
+  down to PHONE_WARN_AT percent and not charging. These are only spoken (from 8 am to 10 pm,
+  not in do not disturb), never posted in Discord.
 
 What was already sent is kept in data/proactive.json, so a restart doesn't repeat anything.
 Reminders that would land after 10 pm (work due at 11:59 PM) go out at 10 pm instead.
@@ -68,6 +76,11 @@ PHONE_EVERY = 5 * 60  # seconds between phone battery checks
 PHONE_REARM_ABOVE = 5  # points over a warning level (or charging) before it can warn again
 PHONE_SPOKEN_HOURS = range(8, 22)  # phone alerts are also said out loud at home in these hours
 ALL_DAY_TIME = 9  # an all-day deadline counts as due at 9 am for reminders
+TODO_REMIND_DAYS = {"work": 2, "other": 1}  # todo reminders start this many days before the due day
+TODO_REMIND_BEFORE = timedelta(hours=2)  # and one comes this long before a due with a time
+TODO_SPOKEN_HOURS = range(8, 22)  # todo reminders are also said out loud at home in these hours
+TODO_SPOKEN_MAX = 3  # cards read out per reminder; the rest are "and N more"
+COURSE_CODE = re.compile(r"\b([A-Z]{3,4}) ?(\d{3})\b")
 LATEST_REMINDER_HOUR = 22  # a reminder that would go out later (e.g. for 11:59 PM work) goes at 10 pm
 
 EMAIL_QUERY = "in:inbox is:unread newer_than:2d -category:promotions -category:social -category:forums"
@@ -235,14 +248,111 @@ def check_onq(state, now):
     except onq.LoginNeeded as e:
         log.warning("%s", e)  # onq already posted the login request once
         return
+    try:
+        cards = [c for c in trello.open_cards() if c["due"]]
+    except Exception as e:
+        log.warning("Trello unavailable, OnQ reminders sent for everything: %s", e)
+        cards = []
     for i in items:
         if i["kind"] not in ONQ_KINDS or i["submitted"]:
             continue
+        if any(_same_work(c, i) for c in cards):
+            continue  # it's a Trello card too: check_todos reminds about it
         what = "due" if i["kind"] == "assignment" else "closes"
         _remind(sent, f"onq:{i['id']}|{i['when'].isoformat()}", i["when"], ONQ_REMIND_BEFORE, now,
                 f"📚 **{i['title']}** ({i['code']}) {what} {_when(i['when'], now)}"
                 + (", not submitted yet" if i["submitted"] is False else ""))
     _forget_past(sent, now)
+
+
+# --- todos ---------------------------------------------------------------------------------
+
+def _same_work(card, item):
+    """Whether a Trello card is this OnQ item: its title has the same course code and it's due
+    at the same time (intake copies OnQ's due times)."""
+    m = COURSE_CODE.search(card["name"].upper())
+    return (m is not None and f"{m[1]} {m[2]}" == item["code"] and card["due"] is not None
+            and abs(card["due"] - item["when"]) < timedelta(minutes=2))
+
+
+def todo_times(card, until):
+    """When card (from trello.open_cards, with a due date) is reminded, up to until: at
+    TODO_REMIND_TIMES every day from TODO_REMIND_DAYS before its due day on, overdue days
+    included, and TODO_REMIND_BEFORE before a due with a time (one given as a day only is
+    11:59 PM)."""
+    due = card["due"]
+    bigger = TEST_WORDS.search(card["name"]) or WORK_WORDS.search(card["name"])
+    day = due.date() - timedelta(days=TODO_REMIND_DAYS["work" if bigger else "other"])
+    times = set()
+    while day <= until.date():
+        times |= {datetime.combine(day, t, TZ) for t in config.TODO_REMIND_TIMES}
+        day += timedelta(days=1)
+    if (due.hour, due.minute) != (23, 59):
+        times.add(_send_at(due - TODO_REMIND_BEFORE))
+    return sorted(t for t in times if t <= until)
+
+
+def _overdue(due, now):
+    """'since 9:00 PM yesterday', 'since 11:59 PM Sun Nov 1'."""
+    clock = f"{due:%I:%M %p}".lstrip("0")
+    days = (now.date() - due.date()).days
+    return f"since {clock}" + {0: " today", 1: " yesterday"}.get(days, f" {due:%a %b} {due.day}")
+
+
+def _say_due(due, now):
+    """The due time for speaking: 'due tonight', 'due tomorrow at 9 PM', 'overdue'."""
+    if due <= now:
+        return "overdue"
+    clock = "" if (due.hour, due.minute) == (23, 59) else (
+        " at " + f"{due:%I:%M %p}".lstrip("0").replace(":00", ""))
+    days = (due.date() - now.date()).days
+    if days == 0:
+        return "due " + (f"today{clock}" if clock else "tonight")
+    return f"due {'tomorrow' if days == 1 else f'on {due:%A}'}{clock}"
+
+
+def check_todos(state, now):
+    # "card id|due" -> the latest reminder time covered. A card (or a new due date) counts from
+    # when it's first seen here, so dating a card doesn't set off a reminder straight away.
+    sent = state.setdefault("todo_reminded", {})
+    cards = [c for c in trello.open_cards() if c["due"]]
+    keys = {c["id"]: f"{c['id']}|{c['due'].isoformat()}" for c in cards}
+    pending = []
+    for c in cards:
+        times = todo_times(c, now)
+        if keys[c["id"]] not in sent:
+            sent[keys[c["id"]]] = now.isoformat()
+        elif times and datetime.fromisoformat(sent[keys[c["id"]]]) < times[-1]:
+            pending.append((c, times[-1]))
+    items = []
+    if any(COURSE_CODE.search(c["name"].upper()) for c, _ in pending):
+        try:  # submitted coursework isn't reminded
+            items = onq.due_items(min(c["due"] for c, _ in pending) - timedelta(minutes=2),
+                                  max(c["due"] for c, _ in pending) + timedelta(minutes=2))
+        except Exception as e:
+            log.warning("OnQ unavailable for todo reminders: %s", e)
+    written, spoken = [], []
+    for c, latest in sorted(pending, key=lambda p: p[0]["due"]):
+        sent[keys[c["id"]]] = latest.isoformat()
+        work = next((i for i in items if _same_work(c, i)), None)
+        if work and work["submitted"]:
+            continue
+        unsubmitted = ", not submitted on OnQ yet" if work and work["submitted"] is False else ""
+        written.append(f"**{c['name']}** " + (f"is due {_when(c['due'], now)}" if c["due"] > now
+                                              else f"is overdue, {_overdue(c['due'], now)}")
+                       + unsubmitted)
+        spoken.append(f"{c['name']} is {_say_due(c['due'], now)}")
+    if written:
+        notify.post("⏰ " + written[0] if len(written) == 1
+                    else "⏰ Todos due:\n" + "\n".join(f"- {w}" for w in written))
+        if (now.hour in TODO_SPOKEN_HOURS and notify.available("voice")
+                and not dnd.active()):
+            more = len(spoken) - TODO_SPOKEN_MAX
+            notify.send("voice", f"Sir, {'reminders' if len(spoken) > 1 else 'a reminder'}: "
+                        + "; ".join(spoken[:TODO_SPOKEN_MAX])
+                        + (f"; and {more} more on your todo list." if more > 0 else "."))
+    for key in set(sent) - set(keys.values()):
+        del sent[key]  # done, moved to Done, or its due date changed
 
 
 # --- email ---------------------------------------------------------------------------------
@@ -327,8 +437,8 @@ def check_phone(state, now):
         warned = {w for w in warned if b["percent"] <= w + PHONE_REARM_ABOVE}
         due = [w for w in config.PHONE_WARN_AT if b["percent"] <= w and w not in warned]
         if due:
+            # Spoken only, never posted in Discord (the owner asked).
             text = f"Sir, your phone is at {b['percent']}% and isn't charging."
-            notify.post(f"\U0001faab {text}")
             if (now.hour in PHONE_SPOKEN_HOURS and notify.available("voice")
                     and not dnd.active()):
                 notify.send("voice", text)
@@ -551,6 +661,7 @@ def run():
                                    ("soloist", check_soloist, SOLOIST_EVERY),
                                    ("reminders", check_reminders, REMINDER_EVERY),
                                    ("onq", check_onq, ONQ_EVERY),
+                                   ("todos", check_todos, REMINDER_EVERY),
                                    ("email", check_email, EMAIL_EVERY),
                                    ("intake", intake.check, intake.EVERY)):
             if time.monotonic() - last.get(name, 0.0) < every:
@@ -569,7 +680,7 @@ def start():
 
 
 if __name__ == "__main__":
-    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|email|intake|phone]
+    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|todos|email|intake|phone]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
     import sys
     now = datetime.now(TZ)
@@ -588,6 +699,28 @@ if __name__ == "__main__":
                   f"submitted={i['submitted']}; reminders at "
                   + ", ".join(f"{_send_at(i['when'] - o):%a %b %d %I:%M %p}" for o in ONQ_REMIND_BEFORE)
                   + ("" if i["kind"] in ONQ_KINDS else " [no reminder: calendar event]"))
+    elif what == "todos":
+        cards = trello.open_cards()
+        items = onq.due_items(now - timedelta(days=14), now + timedelta(days=30))
+        sent = _load().get("todo_reminded", {})
+        for c in sorted(cards, key=lambda c: (c["due"] is None, c["due"] or now)):
+            if c["due"] is None:
+                print(f"{c['name']} [{c['list']}]: no due date, no reminders")
+                continue
+            work = next((i for i in items if _same_work(c, i)), None)
+            last = sent.get(f"{c['id']}|{c['due'].isoformat()}")
+            past = todo_times(c, now)
+            upcoming = [t for t in todo_times(c, max(now, c["due"]) + timedelta(days=1)) if t > now]
+            print(f"{c['name']} [{c['list']}] due "
+                  + (_when(c["due"], now) if c["due"] > now else f"overdue, {_overdue(c['due'], now)}")
+                  + (f"; OnQ {work['kind']} {work['title']!r}, submitted={work['submitted']}"
+                     if work else "")
+                  + ("; not seen by the check yet (counts from then)" if last is None
+                     else "; one goes out at the next check" if past and datetime.fromisoformat(last) < past[-1]
+                     else "")
+                  + "; reminders at " + (", ".join(f"{t:%a %b %d %I:%M %p}" for t in upcoming) or "none")
+                  + (", then every day at " + ", ".join(f"{t:%I:%M %p}".lstrip("0") for t in config.TODO_REMIND_TIMES)
+                     + " until it's done" if upcoming else ""))
     elif what == "email":
         found = gmail.search_email(EMAIL_QUERY, 20)
         emails = found["emails"] if isinstance(found, dict) else []

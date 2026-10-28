@@ -458,17 +458,8 @@ def _speak(mic, texts, thinking=False, timing=None, stop=None):
     """Speak texts (a list, or _Sentences still streaming in), stopping if the owner says stop.
     thinking plays the thinking sound while waiting on texts; timing is a latency.Turn. Returns
     (time speech started or None, whether it was stopped). When stopped, remembers where, so
-    "continue" can resume. With do not disturb on, nothing is said: a list is posted in
-    Discord, and _Sentences is left for _answer to post (as the final reply, without the
-    "Checking your calendar." said before tools)."""
+    "continue" can resume."""
     global _unfinished
-    if dnd.active():
-        if isinstance(texts, _Sentences):
-            for _ in texts:  # until Claude has finished
-                pass
-        else:
-            _post_quietly(" ".join(texts))
-        return None, False
     stop, done = stop or threading.Event(), threading.Event()
     saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
               else (lambda: " ".join(texts)))
@@ -644,7 +635,6 @@ def _answer(mic, brain, utterance, follow_up, turn):
             sentences.close()
 
     thinker = threading.Thread(target=think, name="claude", daemon=True)
-    quiet = dnd.active()
     with _speaker:
         thinker.start()
         # Speaks while Claude is still writing, with the thinking sound while it waits.
@@ -664,9 +654,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
             log.info("not meant for me, back to idle")
             turn.outcome = "ignored"
             return False
-        if quiet:
-            _post_quietly(reply)
-        elif not sentences.spoken:  # a reply that wasn't streamed, e.g. after a refusal
+        if not sentences.spoken:  # a reply that wasn't streamed, e.g. after a refusal
             _, stopped = _speak(mic, [reply], timing=turn)
             if stopped:
                 mic.clear()
@@ -708,7 +696,7 @@ def _goodnight(mic, turn):
     log.info("goodnight (local): %s", reply)
     with _speaker:
         _speak(mic, [reply], timing=turn)
-    dnd.set_dnd(True)  # after saying it: with do not disturb on, it would only be posted
+    dnd.set_dnd(True)
     mic.clear()
     _last_reply = turn.reply = reply
     turn.outcome = "goodnight"

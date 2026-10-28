@@ -65,6 +65,24 @@ def request(text):
     return None
 
 
+def _first_event_note(now, channel):
+    """For goodnight: the first event of the morning ahead (today, if it's before MORNING_FROM)
+    when there's no alarm for it, or the heads-up if the alarm is too late for it. "" if there's
+    nothing to say, or the calendar didn't answer."""
+    day = now.date() + (timedelta() if now.hour < proactive.MORNING_FROM else timedelta(days=1))
+    event = alarms.first_event(day)
+    if event is None:
+        return ""
+    alarm = alarms.morning_alarm(day)
+    if alarm is None:
+        when = "tomorrow" if day > now.date() else "today"
+        return (f" Your first event {when} is {alarms.event_name(event, channel)}, "
+                f"at {alarms._clock(event['start'], channel)}.")
+    if alarms.too_late(alarm["at"], event):
+        return f" {alarms.heads_up(alarm['at'], event, channel)}"
+    return ""
+
+
 def goodnight(channel):
     """Turn the lights off; returns what to say: goodnight, when the alarm is, and any light
     that didn't answer. The caller turns do not disturb on once it's been said (with it on,
@@ -77,6 +95,7 @@ def goodnight(channel):
         reply += f" Your alarm is set for {alarms._say(upcoming[0]['at'], now, channel)}."
     else:
         reply += " There's no alarm set for the morning."
+    reply += _first_event_note(now, channel)
     if lights != "Lights off, sir.":  # switch_all's answer when every light went off
         reply += f" {lights}"
     return reply

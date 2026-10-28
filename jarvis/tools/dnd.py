@@ -1,10 +1,11 @@
-"""Do not disturb: while it's on, Jarvis says nothing out loud. Replies to "Hey Jarvis" and
-alerts (timers, "I'm finished in ...", tell_owner) are posted in Discord instead; alarms still
-ring. The state is kept in data/dnd.json, so it lasts through a restart; the settings window
-(jarvis-wrapper's /jarvis settings) writes the same file.
+"""Do not disturb: while it's on, Jarvis gives no notifications. Alerts it starts itself
+(timers, "I'm finished in ...", tell_owner, the phone battery, reminders) are posted in Discord
+instead of spoken; alarms still ring, and "Hey Jarvis" is still answered out loud. The state
+is kept in data/dnd.json, so it lasts through a restart; the settings window (jarvis-wrapper's
+/jarvis settings) writes the same file.
 
 Turned on and off by voice or Discord ("do not disturb", "do not disturb off": answered here,
-without Claude), or by Claude with the do_not_disturb tool ("don't talk for an hour").
+without Claude), or by Claude with the do_not_disturb tool ("no notifications for an hour").
 """
 
 import json
@@ -57,11 +58,12 @@ def set_dnd(on, minutes=None):
     if not on:
         return "Do not disturb is off, sir."
     return (f"Do not disturb is on until {until:%-I:%M %p}." if until else
-            "Do not disturb is on. I'll stay quiet and post here instead.")
+            "Do not disturb is on. I'll post alerts in Discord instead of saying them.")
 
 
-@tool("Do not disturb: while on, Jarvis speaks nothing out loud (replies and alerts go to "
-      "Discord instead; alarms still ring). Turn it on or off, or check it with status (only "
+@tool("Do not disturb: while on, Jarvis doesn't speak alerts it starts itself (timers, "
+      "updates, tell_owner go to Discord instead; alarms still ring), but still answers out "
+      "loud when the owner says Hey Jarvis. Turn it on or off, or check it with status (only "
       "change it when asked to); minutes is how long it stays on, 0 for until turned off.",
       action={"type": "string", "enum": ["on", "off", "status"]},
       minutes={"type": "integer", "minimum": 0})

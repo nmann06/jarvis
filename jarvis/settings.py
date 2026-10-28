@@ -88,7 +88,8 @@ SETTINGS = [
     S("WHISPER_THREADS", "Speech recognition", "CPU threads", "int", "4", "Threads for Whisper on CPU"),
     # Do not disturb (data/dnd.json, not .env)
     S("DND", "Do not disturb", "Do not disturb", "bool", "off",
-      "Say nothing out loud: replies and alerts go to Discord, alarms still ring. Applies at once"),
+      "No spoken alerts: timers, updates and reminders go to Discord, alarms still ring, and "
+      "Hey Jarvis is still answered out loud. Applies at once"),
     # Alarms
     S("ALARM_SOUND", "Alarms", "Default sound", "choice", "classic",
       "Sound for alarms that don't name one", ["classic", "digital", "chimes", "marimba", "birds"]),
@@ -99,6 +100,8 @@ SETTINGS = [
     S("ALARM_MIN_VOLUME", "Alarms", "Speaker at least (%)", "int", "60",
       "The speaker is raised to this if it's lower"),
     S("ALARM_SNOOZE_MINUTES", "Alarms", "Snooze (minutes)", "int", "9", "How long a snooze lasts"),
+    S("ALARM_BEFORE_FIRST_EVENT", "Alarms", "Before the first event (minutes)", "int", "30",
+      "Jarvis warns if a morning alarm is closer than this to the day's first event (not classes)"),
     # Homecoming
     S("HOMECOMING", "Homecoming", "Homecoming", "bool", "on",
       "Clap twice, then \"Daddy's home\": lights, a greeting and an update"),
@@ -126,6 +129,8 @@ SETTINGS = [
       "When the briefing is prepared and posted (H:MM), unless an alarm makes it earlier"),
     S("BRIEFING_BEFORE_ALARM", "Calendar & briefing", "Before a morning alarm (minutes)", "int",
       "15", "Prepared this long before a morning alarm, if that's before the time above"),
+    S("TODO_REMIND_TIMES", "Calendar & briefing", "Todo reminders at", "text", "9:00,17:00",
+      "Due Trello todos are reminded at these times (H:MM, comma separated) until they're done"),
     S("ICLOUD_CALENDAR", "Calendar & briefing", "Default calendar", "text", "Jarvis",
       "Apple calendar new events go in"),
     # Services
@@ -218,6 +223,10 @@ def _check(s, value):
         m = re.fullmatch(r"(\d{1,2}):(\d\d)", value.strip())
         if not m or int(m[1]) > 23 or int(m[2]) > 59:
             raise ValueError(f"{s['label']}: a time like 7:45 (24-hour)")
+    if s["key"] == "TODO_REMIND_TIMES":
+        times = [t.strip() for t in value.split(",") if t.strip()]
+        if not times or not all(re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", t) for t in times):
+            raise ValueError(f"{s['label']}: times like 9:00,17:00 (24-hour)")
     if "\n" in value:
         raise ValueError("One line only")
     return value.strip()

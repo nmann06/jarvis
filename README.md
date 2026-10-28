@@ -466,6 +466,14 @@ understand gets a fixed reply. Claude's system prompt tells it alarms aren't its
   works too.
 - Kept in `data/alarms.json`, so they survive a restart; one missed by more than 15 minutes
   (Jarvis not running) is reported in Discord instead.
+- **First event check**: when you set a morning alarm (4 am to noon, more than an hour away)
+  that is the day's earliest and less than `ALARM_BEFORE_FIRST_EVENT` (30) minutes before the
+  day's first event, the same reply adds a heads-up naming the event and its start time ("Alarm
+  set for seven forty five tomorrow. Heads up, sir: your ELEC three fifty three lab starts at
+  eight o'clock, so that's less than half an hour before it."). Lectures and tutorials (Classes
+  other than labs), all-day events and due-work entries ("Lab report due") don't count; labs,
+  tests and everything else do. The calendar is asked for at most 3 seconds; if it fails or is
+  slow, nothing is said (`python -m unittest tests.test_alarm_events`).
 - `python -m jarvis.alarms "set an alarm for 7:30 tomorrow"` shows what a phrase parses to;
   `python -m jarvis.alarms --play` plays each sound.
 
@@ -496,6 +504,9 @@ any is on, else all on); anything that names a switch or asks about them goes to
 
 - **"Hey Jarvis, goodnight"** (or "I'm going to bed"): the lights go off, Jarvis says goodnight
   and when your alarm is (or that none is set), then do not disturb goes on until the morning.
+  With no morning alarm it also says what tomorrow's first event is and when it starts, so you
+  know what to set; with an alarm that's too close to it, it gives the same heads-up as
+  setting one (see Alarms; before 4 am "tomorrow" means today).
 - **Good morning** starts when you turn off a morning alarm (4 am to noon, once a day; a snooze
   or an alarm that rings out doesn't count), or whenever you say "Hey Jarvis, good morning":
   do not disturb goes off, the lights come on one by one, Jarvis says good morning and the time,
@@ -516,19 +527,20 @@ Every 5 minutes Jarvis reads your iPhone's battery from Find My on the Mac VM (s
 your Apple ID for Messages): on Monterey the Find My app keeps what it shows in a plain JSON
 cache, `~/Library/Caches/com.apple.findmy.fmipcore/Devices.data`, refreshed about once a minute
 while it's open. If that's over 15 minutes old, Jarvis opens Find My again (hidden). At 20% and
-10% (`PHONE_WARN_AT`) while not charging it posts in #jarvis, and says it out loud too from
-8 am to 10 pm unless do not disturb is on. It warns again once the phone has charged.
+10% (`PHONE_WARN_AT`) while not charging it says so out loud, from 8 am to 10 pm unless do
+not disturb is on (never in #jarvis). It warns again once the phone has charged.
 `phone_battery` lets Claude answer "what's my phone battery at?". The phone is your own iPhone
 in Find My (family members' devices are left out), or `FINDMY_PHONE`.
 `.venv/bin/python -m jarvis.tools.findmy` prints every device's battery it can see.
 
 ## Do not disturb
 
-"Hey Jarvis, do not disturb" (or "DND on", in Discord too) and Jarvis says nothing out loud
-until "do not disturb off" / "you can talk again": replies to "Hey Jarvis" and alerts (timers,
-"I'm finished in ...", `tell_owner`, project updates) are posted in #jarvis with a 🔕 instead.
-Alarms still ring, and the listening chimes still play when you wake it. Claude can also turn it
-on for a while with the `do_not_disturb` tool ("don't talk for an hour"). The state is in
+"Hey Jarvis, do not disturb" (or "DND on", in Discord too) and Jarvis stops giving you
+notifications until "do not disturb off" / "you can talk again": alerts it starts itself
+(timers, "I'm finished in ...", `tell_owner`, project updates) are posted in #jarvis with a 🔕
+instead of spoken. Alarms still ring, and "Hey Jarvis" is still answered out loud, chimes,
+replies, follow-ups and all. Claude can also turn it
+on for a while with the `do_not_disturb` tool ("no notifications for an hour"). The state is in
 `data/dnd.json`, so it lasts through a restart.
 
 ## Intake
@@ -540,12 +552,18 @@ next 3 weeks that isn't submitted, new course announcements, inbox email from th
 (so a quick reply from you counts). Claude reads that next to the Trello cards, the next 60 days
 of calendar (Classes left out) and what intake added before, and picks:
 
-- todos, added to the `todo` list on the main Trello board with a due date if there is one:
-  coursework due, forms, things you agreed to do, and "Respond to <name>" for messages that
-  need a real answer;
+- todos, added to the `todo` list on the main Trello board: coursework due, forms, things you
+  agreed or were asked to do ("Send Zoom invite to Kelly Saunders" rather than "Respond to
+  Kelly Saunders" when that's what's asked), and "Respond to <name>" for messages that need a
+  real answer. Anything that has to be done by a certain time gets a due date, so the todo
+  reminders (below) pick it up: coursework when it's due or closes, and something to do before
+  a meeting or event comfortably before it (the evening before a morning meeting, a few hours
+  before a later one), never at the event's own time;
 - events, added to Apple Calendar: interviews, appointments, plans you agreed to and in-person
   tests (those go in Midterms, so the test reminders pick them up). Coursework stays on Trello,
   so it isn't reminded twice;
+- due dates for cards already on the list with none that clearly need one (say a card of
+  yours for a meeting that's on the calendar), at most 5 per run, posted in #jarvis with why;
 - done cards, moved to Done straight away: a "Respond to <name>" card once you've texted that
   person back, or any card your texts say you've done ("just paid it"). Your own texts are
   looked at as soon as they're sent rather than after 30 minutes, so this happens within 20
@@ -561,7 +579,27 @@ Email and texts are handed to Claude as untrusted content. What was already read
 `intake` in `data/proactive.json`.
 
 `python -m jarvis.proactive intake` shows how many new items each source has and what it would
-add, without adding anything.
+add or date, without changing anything.
+
+## Todo reminders
+
+Open cards on the main Trello board with a due date (any list but Done, and not ticked
+complete) are reminded in #jarvis at `TODO_REMIND_TIMES` (9:00 and 17:00) every day from the
+day before they're due (two days before for coursework: labs, reports, assignments, quizzes),
+plus 2 hours before a due with a time (a day-only due counts as 11:59 PM and gets none), then
+at those times every day once overdue, until the card is moved to Done. Everything due at one
+time goes in one message, which is also said out loud from 8 am to 10 pm unless do not disturb
+is on. A card counts from when the check first sees it (or its new due date), so adding or
+dating one doesn't set off a reminder straight away.
+
+Coursework often has both an OnQ entry and a card (intake copies OnQ's due time): when the
+card's title has the same course code and its due time matches, the card's reminders replace
+OnQ's, say "not submitted on OnQ yet", and stop once it's submitted. `trello_set_due` lets
+Claude set or clear a card's due date ("make the invite card due tonight at 9"). What was sent
+is kept under `todo_reminded` in `data/proactive.json`.
+
+`python -m jarvis.proactive todos` lists the open cards and when each would be reminded,
+without posting.
 
 ## Tools
 

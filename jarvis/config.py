@@ -1,6 +1,8 @@
 """Settings loaded from ~/jarvis/.env (see .env.example)."""
 
 import os
+import re
+from datetime import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -52,6 +54,11 @@ ICLOUD_CALENDAR = os.getenv("ICLOUD_CALENDAR", "Jarvis")  # default calendar for
 # BRIEFING_BEFORE_ALARM minutes before a morning alarm if that's earlier (jarvis/routines.py)
 BRIEFING_TIME = os.getenv("BRIEFING_TIME", "7:45")
 BRIEFING_BEFORE_ALARM = int(os.getenv("BRIEFING_BEFORE_ALARM", "15"))
+# Trello todos with a due date are reminded at these times of day (H:MM, comma separated), from
+# a day or two before they're due until they're done (jarvis/proactive.py)
+TODO_REMIND_TIMES = sorted({time(int(h), int(m)) for h, m in re.findall(
+    r"\b(\d{1,2}):(\d\d)\b", os.getenv("TODO_REMIND_TIMES", "9:00,17:00"))
+    if int(h) < 24 and int(m) < 60}) or [time(9), time(17)]
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")  # job-search sheet, from its URL
 TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/authorize
@@ -93,6 +100,8 @@ ALARM_RAMP_MINUTES = float(os.getenv("ALARM_RAMP_MINUTES", "15"))  # quiet to fu
 ALARM_START_VOLUME = float(os.getenv("ALARM_START_VOLUME", "10"))  # percent of full, at first
 ALARM_MIN_VOLUME = int(os.getenv("ALARM_MIN_VOLUME", "60"))  # speaker raised to this if lower
 ALARM_SNOOZE_MINUTES = int(os.getenv("ALARM_SNOOZE_MINUTES", "9"))
+# A morning alarm should go off at least this long before the day's first event (not classes)
+ALARM_BEFORE_FIRST_EVENT = int(os.getenv("ALARM_BEFORE_FIRST_EVENT", "30"))
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")  # "cuda" or "cpu"
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
