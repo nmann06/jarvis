@@ -9,6 +9,9 @@ isn't running, nothing happens.
 
 Quick turns stay quiet, since you're probably still watching: only something that comes more
 than JARVIS_CLAUDE_MIN_SECONDS (default 30) after you last sent Claude a message is said.
+A Jarvis window (~/jarvis-wrapper) muted with /mute isn't said to be finished: it runs its
+Claude Codes with JARVIS_WINDOW set, and /mute leaves a flag file named for it under
+$XDG_RUNTIME_DIR/jarvis-claude/muted. What needs you is still said.
 """
 
 import json
@@ -39,6 +42,12 @@ def busy_for(session):
         return None
 
 
+def muted():
+    """This session is a muted Jarvis window's (its own conversation or a /manager thread's)."""
+    window = re.sub(r"[^\w-]", "", os.getenv("JARVIS_WINDOW", ""))
+    return bool(window) and (STATE / "muted" / window).exists()
+
+
 def mark(session):
     STATE.mkdir(mode=0o700, exist_ok=True)
     (STATE / session).write_text(str(time.time()))
@@ -47,7 +56,7 @@ def mark(session):
 def message(event):
     name, where = event.get("hook_event_name"), project(event.get("cwd", ""))
     if name == "Stop":
-        return f"I'm finished in {where}."
+        return None if muted() else f"I'm finished in {where}."
     if name == "Notification":
         kind = event.get("notification_type")
         if kind == "permission_prompt":

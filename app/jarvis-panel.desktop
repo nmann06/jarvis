@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Jarvis Panel
+Comment=Set up, configure and improve Jarvis
+# Edit Exec and Icon if you built somewhere else. To install: cp jarvis-panel.desktop ~/.local/share/applications/
+Exec=/home/nate/jarvis/app/dist/jarvis-panel/jarvis-panel
+Icon=/home/nate/jarvis/app/assets/jarvis-panel.png
+Terminal=false
+Categories=Utility;
+StartupWMClass=jarvis-panel

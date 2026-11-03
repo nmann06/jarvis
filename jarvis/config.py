@@ -60,6 +60,11 @@ TODO_REMIND_TIMES = sorted({time(int(h), int(m)) for h, m in re.findall(
     r"\b(\d{1,2}):(\d\d)\b", os.getenv("TODO_REMIND_TIMES", "9:00,17:00"))
     if int(h) < 24 and int(m) < 60}) or [time(9), time(17)]
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")  # job-search sheet, from its URL
+# Zoho Mail over IMAP, a second inbox beside Gmail (README: Zoho setup): the address, an
+# application-specific password, and the IMAP server of the account's Zoho data centre
+ZOHO_USER = os.getenv("ZOHO_USER", "")
+ZOHO_APP_PASSWORD = os.getenv("ZOHO_APP_PASSWORD", "")
+ZOHO_IMAP_HOST = os.getenv("ZOHO_IMAP_HOST", "imappro.zohocloud.ca")
 TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/authorize
 TRELLO_BOARD = os.getenv("TRELLO_BOARD", "todo")  # main todo board
@@ -71,10 +76,6 @@ ONEDRIVE_CLIENT_ID = os.getenv("ONEDRIVE_CLIENT_ID", "")  # Entra app registrati
 # Which accounts can sign in: common (any), consumers (personal), organizations, or a
 # school or work tenant such as queensu.ca
 ONEDRIVE_TENANT = os.getenv("ONEDRIVE_TENANT", "common")
-
-
-# Phone battery alerts at these percentages (on the way down, not while charging)
-PHONE_WARN_AT = [int(p) for p in os.getenv("PHONE_WARN_AT", "20,10").split(",") if p.strip()]
 SMITH_USER = os.getenv("SMITH_USER", "")  # smithlearning.ca login, so expired sessions renew
 SMITH_PASSWORD = os.getenv("SMITH_PASSWORD", "")
 # Kasa account, only so the switches log in again by themselves if the saved login expires;
@@ -106,19 +107,6 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")  # "cuda" or "cpu"
 WHISPER_THREADS = int(os.getenv("WHISPER_THREADS", "4"))
 WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))  # 0-1; higher = fewer false wakes
-
-
-
-
-# lower them if it misses yours.
-
-
-
-# knock on a door
-
-
-
-
 SPEECH_THRESHOLD = float(os.getenv("SPEECH_THRESHOLD", "0.5"))  # Silero VAD speech probability
 SILENCE_SECONDS = float(os.getenv("SILENCE_SECONDS", "0.8"))  # pause that ends an utterance
 # Shorter pause that ends it when the words so far are a finished sentence ("What time is

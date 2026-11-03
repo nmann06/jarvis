@@ -8,7 +8,7 @@ that rang out), once a day, or whenever they say "good morning": do not disturb 
 lights come on one by one, and Jarvis says good morning and the time, then reads out the
 morning briefing. That's the one proactive put together before the alarm and posted in
 #jarvis (data/briefing.json), so nothing is looked up twice; if there isn't one yet, it's put
-together (and posted) now.
+together (and posted) now. Then how a delayed project that ran overnight went, if one did.
 
 The voice loop (jarvis/voice.py) runs them; in Discord, "goodnight" and "good morning" do the
 same without the talking.
@@ -20,7 +20,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timedelta
 
-
+from jarvis import alarms, proactive, project
 from jarvis.tools import dnd, kasa
 from jarvis.tools.clock import TZ
 
@@ -101,8 +101,11 @@ def goodnight(channel):
     return reply
 
 
-def _sentences(text):
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
+
+def _sentences(text):
+    return [s for s in SENTENCE_END.split(text.strip()) if s]
 
 
 def good_morning(speak):
@@ -118,15 +121,15 @@ def good_morning(speak):
         job = pool.submit(proactive.briefing)  # at once if it's ready, as it usually is
         pool.shutdown(wait=False)
         lights = {}
-
+        switching = threading.Thread(target=kasa.lights_up, args=(lights,),
                                      name="morning-lights", daemon=True)
         switching.start()
         if speak([f"Good morning, sir. It's {clock_words(datetime.now(TZ))}."]) is False:
             return
         said = []
         switching.join(timeout=2)  # still going after that: say nothing about them
-
-
+        if not switching.is_alive() and kasa.lights_up_line(lights):
+            said.append(kasa.lights_up_line(lights))
         if not job.done():
             if speak(said + ["Your briefing is on its way."]) is False:
                 return
@@ -138,6 +141,7 @@ def good_morning(speak):
         except Exception:
             log.exception("good morning: no briefing")
             said.append("I couldn't put the briefing together, I'm afraid.")
+        said += project.news()  # a delayed project that ran overnight
         speak(said)
     except Exception:
         log.exception("good morning failed")
@@ -152,9 +156,9 @@ def written(routine):
     if dnd.active():
         dnd.set_dnd(False)
     lights = {}
-
+    kasa.lights_up(lights)
     reply = "Good morning, sir."
-
+    if line := kasa.lights_up_line(lights):
         reply += f" {line}"
     try:
         proactive.briefing()  # posted in #jarvis when it's put together, so it's there already

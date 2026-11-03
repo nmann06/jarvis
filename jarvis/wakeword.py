@@ -10,7 +10,7 @@ import numpy as np
 from openwakeword.model import Model
 from openwakeword.utils import download_models
 
-from jarvis import audio, config
+from jarvis import audio, config, events
 
 MODEL = "hey_jarvis"
 PREROLL_BLOCKS = 5  # 400 ms: the model fires late in "Jarvis", so keep the audio just before
@@ -25,8 +25,8 @@ class WakeWord:
     def wait(self, mic, interrupt=None, also=None):
         """Block until the wake word is heard; returns the detection score. If interrupt is
         given, it's checked every block, and wait returns None as soon as it's true. If also
-
-        as it returns True.
+        is given, it's fed every block too (voice's silent listeners), and wait returns None
+        as soon as it returns True.
 
         Afterwards self.preroll holds the last blocks heard, which may contain the start of
         the request if it followed "Hey Jarvis" without a pause.
@@ -41,11 +41,18 @@ class WakeWord:
             if (score := self.heard(block)) is not None:
                 return score
 
+    def reset(self):
+        """Forget the audio heard so far, so it can't count towards the next detection."""
+        self._model.reset()
+        self.preroll.clear()
+
     def heard(self, block):
         """Feed one block; the detection score if that completed a "Hey Jarvis", else None."""
         self.preroll.append(block)
         score = self._model.predict(block)[MODEL]
+        events.wake_score(score, config.WAKE_THRESHOLD)
         if score >= config.WAKE_THRESHOLD:
+            events.wake_fired(score)
             # Clear the model's rolling buffer so one "Hey Jarvis" can't trigger twice.
             self._model.reset()
             return score

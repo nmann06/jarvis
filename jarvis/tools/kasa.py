@@ -32,6 +32,7 @@ TOKEN_FILE = config.ROOT / "data" / "kasa-token.json"
 NOT_LOGGED_IN = ("Not logged in to Kasa: run `.venv/bin/python -m jarvis.tools.kasa login` "
                  "on hyde.")
 CODE_NEEDED = -20677
+LIGHT_GAP = 0.4  # seconds between one light coming on and the next (lights_up)
 
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
@@ -254,8 +255,8 @@ def lights(action, name):
 
 
 def on_in_turn(gap):
-    """Turn the switches on one after another, gap seconds apart, in name order (the
-
+    """Turn the switches on one after another, gap seconds apart, in name order (good
+    morning), leaving out any already on. Returns [(name, True if on now, None if
     unreachable)] for the ones it switched; raises if Kasa can't be reached at all."""
     with _lock:
         devices = _devices or _list()
@@ -264,6 +265,28 @@ def on_in_turn(gap):
         off = [d for d, on in zip(ordered, states) if on is not True]  # unknown: try it anyway
         results = _act_retrying(off, "on", gap)
     return [(d.get_alias(), None if isinstance(r, Exception) else r) for d, r in zip(off, results)]
+
+
+def lights_up(result):
+    """on_in_turn(LIGHT_GAP), for a thread: result (a dict) gets "switched", or "error" if
+    Kasa couldn't be reached."""
+    try:
+        result["switched"] = on_in_turn(LIGHT_GAP)
+    except Exception as e:
+        log.warning("couldn't reach the lights: %s", e)
+        result["error"] = e
+
+
+def lights_up_line(result):
+    """A word about the lights if any didn't come on in lights_up, else None."""
+    if "error" in result:
+        return "I couldn't reach the lights, I'm afraid."
+    missed = [name for name, on in result.get("switched", []) if not on]
+    if not missed:
+        return None
+    if len(missed) == len(result["switched"]) and len(missed) > 1:
+        return "The lights didn't answer, I'm afraid."
+    return f"{' and '.join(missed)} didn't answer, I'm afraid."
 
 
 # Bare "lights on" / "turn off the lights", or just "lights" (a toggle): voice switches every

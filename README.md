@@ -10,6 +10,12 @@ machine itself; only the text of what you say is sent to Claude.
 | Brain | Claude via the `anthropic` SDK (`claude-haiku-5-5` by default) |
 | Microphone | A USB webcam mic |
 
+## Panel
+
+The Jarvis Panel is the app for setting up and improving Jarvis: connect each service, change
+settings, report problems with audio, and see logs and stats. It runs as the `jarvis-panel`
+service. Install and setup: [docs/setup.md](docs/setup.md); how it works: docs/panel-api.md.
+
 ## Speed
 
 From you going quiet to Jarvis's voice takes about 1.4-1.8 s for a plain question and 2.5-3 s
@@ -142,8 +148,8 @@ in `ICLOUD_CALENDAR` (default Jarvis) unless Claude picks a better fit (Work, Cl
 
 ### Google setup (Gmail, Sheets, Drive notes)
 
-Jarvis reads one Gmail inbox (forward your other accounts into it) and can save drafts, never
-send. It also reads and edits one Google Sheet (`GOOGLE_SHEET_ID`), and saves notes as Google Docs in a
+Jarvis reads your Gmail inbox (forward your other accounts into it, or add Zoho below) and can
+save drafts, never send. It also reads and edits one Google Sheet (`GOOGLE_SHEET_ID`), and saves notes as Google Docs in a
 "Jarvis Notes" Drive folder (it can only see files it created there).
 
 1. console.cloud.google.com -> create a project (e.g. "Jarvis").
@@ -160,6 +166,22 @@ send. It also reads and edits one Google Sheet (`GOOGLE_SHEET_ID`), and saves no
    `.google_token.json` and renews itself.
 6. Put the sheet's ID (the part of its URL between `/d/` and `/edit`) in `.env` as
    `GOOGLE_SHEET_ID`, then `systemctl --user restart jarvis`.
+
+### Zoho setup (second inbox)
+
+Your Zoho Mail address is read over IMAP beside Gmail: `search_email` looks in both (newest first;
+`account:zoho` or `account:gmail` in the query picks one). New drafts are saved in Zoho, from your
+own address, unless you ask for Gmail; a reply is drafted in the account the email came to. Gmail-style queries are turned into IMAP searches (`is:unread`,
+`newer_than:2d`, `from:`, `to:`, `subject:`, `in:sent`, plain words); Gmail-only terms such as
+`category:` are ignored for Zoho.
+
+1. Zoho Mail -> Settings -> Mail Accounts -> your address -> IMAP Access: turn it on.
+2. accounts.zohocloud.ca (or accounts.zoho.com, by data centre) -> Security -> App Passwords ->
+   generate one called Jarvis. Zoho needs it whenever two-factor sign-in is on.
+3. In `.env`: `ZOHO_USER` (the address), `ZOHO_APP_PASSWORD`, and `ZOHO_IMAP_HOST` if your account
+   isn't a custom-domain one on the Canada data centre (`imappro.zohocloud.ca`; see `.env.example`).
+4. `systemctl --user restart jarvis`. The first email check only learns what's already in Zoho,
+   so old mail doesn't set off alerts.
 
 ### OnQ setup
 
@@ -266,6 +288,8 @@ things more than 30 s after your last message to that session are said
 a socket Jarvis listens on (`$XDG_RUNTIME_DIR/jarvis.sock`, `jarvis/alerts.py`; project-mode runs,
 which announce themselves, are skipped), spoken, or
 posted in #jarvis if voice is off. Any program can send it `{"text": "..."}` on one line.
+`/mute` in a Jarvis window (`~/jarvis-wrapper`) stops "I'm finished" for that window and its
+/manager threads until `/mute` again or the window closes; what needs you is still said.
 
 The hook is `deploy/claude-hook.py`, set up in `~/.claude/settings.json` for all sessions
 (`|| true` so a missing script can never hold Claude up):
@@ -368,8 +392,6 @@ to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 .venv/bin/python -m jarvis.llm "What time is it?"       # ask Claude by text, with tools
 .venv/bin/python -m tests.discord_ping                      # DMs you a test notification
 .venv/bin/python -m jarvis.wakeword                        # prints WAKE + what you said, Ctrl+C to stop
-
-
 ```
 
 ## Settings (`.env`)
@@ -392,8 +414,6 @@ KEY VALUE`, `restart`), which never shows a secret's value. Do not disturb is th
 | `TTS_LENGTH_SCALE`, `TTS_VOLUME` | `1.0` | Speech speed (>1 is slower) and loudness |
 | `THINKING_SOUND` | `on` | Soft blips while waiting on Claude or a tool (`off` for silence) |
 | `WAKE_THRESHOLD` | `0.5` | Raise if it wakes by itself, lower if it misses you |
-
-
 | `SILENCE_SECONDS` | `0.8` | Pause that ends what you're saying |
 | `QUICK_SILENCE_SECONDS` | `0.5` | Shorter pause that ends it when it's already a finished sentence ("What time is it?"); set to `SILENCE_SECONDS` to always wait the full pause |
 | `FOLLOW_UP_SECONDS` | `5` | How long it listens for a follow-up after replying |
@@ -405,7 +425,7 @@ Done: TTS, STT (GPU), Claude with tools, wake word + end-of-speech detection, fu
 systemd service, Discord bot, Apple Calendar, Gmail, the job-search sheet, Trello, OnQ and Smith
 Learning, briefings and reminders, intake (todos and events from OnQ, email and texts), Claude
 Code alerts, the MCP server, learning mode, project mode. Ready but waiting for your sign-in:
-
+Spotify, OneDrive, Zoho Mail. Ideas for the Windows laptop (seeing its screen,
 editing and running work there): docs/other-laptop.md.
 
 ## Project mode
@@ -439,6 +459,18 @@ Claude Code session per project.
   progress). Messages sent mid-run wait for it to finish. Writing in the project's Discord
   thread sends to it too. "Resume the ... project" reopens one; "what projects do I have"
   lists them.
+- **Starting later:** "start a project at 3am: do my prelab" (by voice, in Discord, or through
+  the MCP server: `start_project`'s `start_at`). Jarvis makes the OneDrive folder there and
+  then and confirms the time ("I'll start the prelab project at three o'clock"); a time already
+  past today means tomorrow. It waits in `data/scheduled-projects.json`, so a restart or reboot
+  doesn't lose it, and proactive's once-a-minute check starts it; one whose time passed while
+  Jarvis was off starts as soon as it's back, saying so in its thread. A delayed project works
+  in Discord only: nothing is said aloud, and Claude Code is told nobody can answer, so it makes
+  its own choices and notes them. The next time you talk to Jarvis by voice, or at good
+  morning, it tells you in a sentence that the project finished (or is still going) and the
+  write-up is in Discord; ask about it as usual. "What projects do I have" lists the waiting
+  ones too; "cancel the prelab project" (`cancel_delayed_project`) drops one before it starts.
+  The laptop has to be awake at that time: if it's asleep, the project starts when it wakes.
 
 It shares the Pro plan's usage limits with your own Claude Code use (Sonnet by default,
 `PROJECT_MODEL`). Needs `MCP_TOKEN` set for the Jarvis tools (it is).
@@ -477,22 +509,7 @@ understand gets a fixed reply. Claude's system prompt tells it alarms aren't its
 - `python -m jarvis.alarms "set an alarm for 7:30 tomorrow"` shows what a phrase parses to;
   `python -m jarvis.alarms --play` plays each sound.
 
-
-
-
-needed: a power-up sound, the lights coming on one by one (any already on are left alone), a
-one-line greeting, and a short update (the next thing on the calendar, anything due in the
-next two days, new texts and flagged emails; the time and weather when there's little else).
-"Stop" cuts the talking short.
-
-
-
-  Whisper then has to hear the phrase within 4 s, or it goes back to listening without a sound.
-
-
-
-
-
+## Lights
 
 "Lights on" and "lights off" (and "turn off the lights", "lights out", "kill the lights") switch
 every light, answered without Claude, and a bare "Hey Jarvis, lights" toggles them (all off if
@@ -521,18 +538,6 @@ any is on, else all on); anything that names a switch or asks about them goes to
   together (and posted) then. `python -m jarvis.proactive briefing` prints both without
   posting.
 
-## Phone battery
-
-
-
-
-
-10% (`PHONE_WARN_AT`) while not charging it says so out loud, from 8 am to 10 pm unless do
-not disturb is on (never in #jarvis). It warns again once the phone has charged.
-`phone_battery` lets Claude answer "what's my phone battery at?". The phone is your own iPhone
-
-
-
 ## Do not disturb
 
 "Hey Jarvis, do not disturb" (or "DND on", in Discord too) and Jarvis stops giving you
@@ -548,9 +553,9 @@ on for a while with the `do_not_disturb` tool ("no notifications for an hour"). 
 `jarvis/intake.py`, run every 20 minutes from the proactive loop, adds todos and calendar events
 by itself. It gathers what's new since it last looked: OnQ and Smith Learning work due in the
 next 3 weeks that isn't submitted, new course announcements, inbox email from the last two days
-
-(so a quick reply from you counts). Claude reads that next to the Trello cards, the next 60 days
-of calendar (Classes left out) and what intake added before, and picks:
+(promotions, social and forums left out), and texts if a source for them is set up. Claude
+reads that next to the Trello cards, the next 60 days of calendar (Classes left out) and what
+intake added before, and picks:
 
 - todos, added to the `todo` list on the main Trello board: coursework due, forms, things you
   agreed or were asked to do ("Send Zoom invite to Kelly Saunders" rather than "Respond to
@@ -565,11 +570,8 @@ of calendar (Classes left out) and what intake added before, and picks:
 - due dates for cards already on the list with none that clearly need one (say a card of
   yours for a meeting that's on the calendar), at most 5 per run, posted in #jarvis with why;
 - done cards, moved to Done straight away: a "Respond to <name>" card once you've texted that
-  person back, or any card your texts say you've done ("just paid it"). Your own texts are
-  looked at as soon as they're sent rather than after 30 minutes, so this happens within 20
-  minutes of your reply, and only your messages count, never someone else saying it's done.
-  Each is posted in #jarvis with why. Reading your texts on request (`messages_recent`) does
-  the same.
+  person back, or any card your texts say you've done ("just paid it"). Only your messages
+  count, never someone else saying it's done. Each is posted in #jarvis with why.
 
 Anything already on Trello (any list) or the calendar is skipped, and so is anything intake
 added in the last 60 days, so removing a wrong card or event keeps it gone. Each run's
@@ -605,7 +607,7 @@ without posting.
 
 Claude can call: `get_events` / `add_event` (Apple Calendar over iCloud CalDAV; adds only, never
 edits or deletes, and DMs you a record of each event added), `get_time_and_date`, `set_timer` / `list_timers`, `add_note` / `list_notes` / `read_note`
-(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), `speaker_volume` (Jarvis and the music together; Spotify's own volume is the music alone), `lights` (Kasa switches, above), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `project_message` / `resume_project` / `list_projects` (project mode, above), OnQ and Smith Learning (read-only):
+(Google Docs in the Jarvis Notes Drive folder), `get_weather` (local weather, Open-Meteo), `system_status`, Spotify (`spotify_now_playing`, `spotify_play`, `spotify_control`, `spotify_devices`), `speaker_volume` (Jarvis and the music together; Spotify's own volume is the music alone), `lights` (Kasa switches, above), OneDrive (`onedrive_list`, `onedrive_search`, `onedrive_read`, `onedrive_create_folder`, `onedrive_save`; never deletes or overwrites), `start_project` / `project_message` / `resume_project` / `list_projects` / `cancel_delayed_project` (project mode, above), OnQ and Smith Learning (read-only):
 `onq_courses`, `onq_due` (assignments with submitted/not, quizzes, course events),
 `onq_announcements`, `onq_grades`, `onq_syllabus` (plus any "deliverable guidance" document; text cached in `data/onq-syllabi/`),
 `onq_content` (everything posted under Content, plus pages linked from module descriptions, as some
@@ -623,6 +625,10 @@ def my_tool(city):
 ```
 
 then add the module to the import line at the bottom of `jarvis/tools/__init__.py`.
+
+Tools, silent listeners, proactive checks, intake sources, settings and Setup page entries can
+also come from a gitignored `private/` package, if there is one: see `jarvis/extras.py`.
+Without it, Jarvis runs as published.
 
 ## Notes
 

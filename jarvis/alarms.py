@@ -670,6 +670,11 @@ _OFF = re.compile(r"\b(?:stop|off|cancel|enough|dismiss|awake|up|quiet|shut|sile
 _pending = {}  # channel -> ("time", sound) or ("cancel", None): what the last reply asked for
 
 
+def drop_pending(channel="voice"):
+    """Forget what the last reply asked for: the owner said never mind."""
+    _pending.pop(channel, None)
+
+
 def local_reply(text, channel="voice", now=None):
     """The reply to an alarm request, having done it; None if text isn't about alarms."""
     now = now or datetime.now(TZ)

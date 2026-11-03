@@ -29,16 +29,19 @@ log = logging.getLogger(__name__)
 
 VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")  # newest first
 INSTRUCTIONS = """Jarvis is the owner's personal assistant, running on their laptop at home. \
-Use ask_jarvis to talk to it in plain language (it remembers recent messages from Claude \
-sessions), tell_owner to get something to the owner right away (spoken aloud at home or posted \
-in their #jarvis Discord channel), or call its tools directly for calendar, email, notes, \
-schoolwork (OnQ), the job-search sheet, Trello, weather and timers."""
+Prefer calling its tools directly for calendar, email, notes, schoolwork (OnQ), the job-search \
+sheet, Trello, weather and timers: they cost nothing extra. Use tell_owner to get something to \
+the owner right away (spoken aloud at home or posted in their #jarvis Discord channel). \
+ask_jarvis runs Jarvis's own Claude on a paid API, so use it only when the owner asks for it \
+or a direct tool can't do the job (it remembers recent messages from Claude sessions)."""
 
 OWN_TOOLS = [
     {"name": "ask_jarvis",
      "description": "Send Jarvis a message and get its reply. Jarvis answers with its own tools "
                     "(calendar, Gmail drafts, notes, OnQ, Trello, the job-search sheet, timers, "
-                    "weather) and remembers the last few messages from Claude sessions.",
+                    "weather) and remembers the last few messages from Claude sessions. It runs "
+                    "on a paid API, so prefer calling those tools directly; use this only when "
+                    "the owner asks for Jarvis or no direct tool fits.",
      "inputSchema": {"type": "object", "required": ["message"], "properties": {
          "message": {"type": "string", "description": "What to say or ask, in plain language"}}}},
     {"name": "tell_owner",

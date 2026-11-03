@@ -6,9 +6,7 @@ Every EVERY seconds (run from the proactive loop) it gathers what's new since it
   calendar items) that isn't submitted, and new course announcements;
 - email: inbox mail from the last two days it hasn't read yet (promotions, social and forums
   left out);
-
-  the owner is seen first, with the conversation's earlier messages for context. The owner's
-  own texts are looked at straight away, so a todo they've just dealt with is cleared at once.
+- texts, and anything else the gitignored private/ adds (jarvis/extras.py), if it does.
 
 Claude reads that next to the Trello cards, the calendar and what intake added before, and
 picks what to add: things to do go on the Trello todo list, with a due date when they have to be
@@ -29,14 +27,13 @@ Preview without adding anything: python -m jarvis.proactive intake
 
 import json
 import logging
-import shlex
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import anthropic
 
-from jarvis import config, notify
-
+from jarvis import config, extras, notify
+from jarvis.tools import gmail, icloud_calendar, onq, trello
 from jarvis.tools.clock import TZ
 
 log = logging.getLogger(__name__)
@@ -45,9 +42,6 @@ EVERY = 20 * 60  # seconds between runs
 ONQ_DAYS = 21  # OnQ work due this far ahead is looked at
 CALENDAR_DAYS = 60  # calendar shown to Claude this far ahead, so nothing is added twice
 EMAIL_QUERY = "in:inbox newer_than:2d -category:promotions -category:social -category:forums"
-TEXT_SETTLE = timedelta(minutes=30)  # texts are looked at once they're this old
-TEXTS_READ = 300  # most recent messages read from the Messages database each run
-TEXT_CONTEXT = 8  # earlier messages shown with a conversation's new ones
 FIRST_LOOK_BACK = timedelta(days=2)  # on the first run, texts and announcements this recent are new
 MAX_ADDS = 8  # cards and events added per run, at most
 MAX_DONE = 5  # cards moved to Done per run, at most
@@ -206,60 +200,15 @@ def email(s, now):
     return entries, {"emails": (seen + new)[-300:]}
 
 
-
-             "h.id AS handle, m.is_from_me AS me, m.text AS text, j.chat_id AS chat, "
-             "c.display_name AS chat_name FROM message m "
-             "LEFT JOIN handle h ON m.handle_id = h.ROWID "
-             "LEFT JOIN chat_message_join j ON j.message_id = m.ROWID "
-             "LEFT JOIN chat c ON c.ROWID = j.chat_id "
-             f"WHERE m.text IS NOT NULL AND m.text != '' ORDER BY m.ROWID DESC LIMIT {TEXTS_READ}")
-
-
-def texts(s, now):
-
-                                    f"{shlex.quote(TEXTS_SQL)}") or "[]")[::-1]
-    settled = [r for r in rows if r["t"] <= (now - TEXT_SETTLE).timestamp()]
-    if "texts_after" in s:
-        new = [r for r in settled if r["id"] > s["texts_after"]]
-    else:
-        new = [r for r in settled if r["t"] >= (now - FIRST_LOOK_BACK).timestamp()]
-    # The owner's own texts don't wait to settle (a reply that clears a "Respond to" card should
-    # clear it now); mine_after keeps them from coming round again as new once they have.
-    mine_after = max(s.get("mine_after", 0), s.get("texts_after", 0))
-    new = [r for r in new if not (r["me"] and r["id"] <= s.get("mine_after", 0))]
-    settled_ids = {r["id"] for r in settled}
-    mine = [r for r in rows if r["me"] and r["id"] not in settled_ids and r["id"] > mine_after
-            and r["t"] >= (now - FIRST_LOOK_BACK).timestamp()]
-    new = sorted(new + mine, key=lambda r: r["id"])
-    remember = {"texts_after": max(r["id"] for r in settled)} if settled else {}
-    if mine:
-        remember["mine_after"] = max(r["id"] for r in mine)
-    if not new:
-        return [], remember
-
-    for chat in dict.fromkeys(r["chat"] for r in new):
-        convo = [r for r in rows if r["chat"] == chat]
-        first = min(r["id"] for r in convo if r["id"] in new_ids)
-        shown = [r for r in convo if r["id"] < first][-TEXT_CONTEXT:] + [r for r in convo if r["id"] >= first]
-        people = convo[0]["chat_name"] or ", ".join(
-
-        entries.append(f"Conversation with {people}:\n" + "\n".join(
-            f"  {'(new) ' if r['id'] in new_ids else ''}"
-            f"{_stamp(datetime.fromtimestamp(r['t'], TZ))} "
-
-            for r in shown))
-    return entries, remember
-
-
 SOURCES = (("New OnQ work due", onq_due), ("New OnQ announcements", onq_announcements),
-           ("New email", email), ("New texts (times are when sent)", texts))
+           ("New email", email))
 
 
 def gather(s, now):
     """[(heading, entries)] of what's new, and the state to remember once it's handled. A
     source that fails is left out and tried again next run."""
     found, remember = [], {}
-    for heading, source in SOURCES:
+    for heading, source in (*SOURCES, *extras.intake_sources()):
         try:
             entries, more = source(s, now)
         except Exception as e:

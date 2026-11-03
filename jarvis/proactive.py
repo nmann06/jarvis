@@ -19,9 +19,9 @@
 - intake (jarvis/intake.py): todos and calendar events picked out of OnQ, email and texts,
   added to Trello and Apple Calendar by themselves, and due dates for todos that need one;
 - power alerts: the laptop went on battery, is running low, or was plugged back in;
+- any checks the gitignored private/ adds (jarvis/extras.py).
 
-  down to PHONE_WARN_AT percent and not charging. These are only spoken (from 8 am to 10 pm,
-  not in do not disturb), never posted in Discord.
+It also starts delayed projects (jarvis.project) when their time comes.
 
 What was already sent is kept in data/proactive.json, so a restart doesn't repeat anything.
 Reminders that would land after 10 pm (work due at 11:59 PM) go out at 10 pm instead.
@@ -40,8 +40,8 @@ from pathlib import Path
 
 import anthropic
 
-from jarvis import alarms, config, intake, notify
-
+from jarvis import alarms, config, extras, intake, notify, project
+from jarvis.tools import dnd, gmail, icloud_calendar, onq, sheets, trello, weather, zoho
 from jarvis.tools.clock import TZ
 
 log = logging.getLogger(__name__)
@@ -72,9 +72,6 @@ SOLOIST_LIFETIME = timedelta(days=90)  # builds stop working 90 days after their
 SOLOIST_WARN_BEFORE = [14, 3]  # days
 SOLOIST_EVERY = 6 * 60 * 60  # seconds between build-expiry checks
 BATTERY_WARN_AT = [20, 10]  # percent
-PHONE_EVERY = 5 * 60  # seconds between phone battery checks
-PHONE_REARM_ABOVE = 5  # points over a warning level (or charging) before it can warn again
-PHONE_SPOKEN_HOURS = range(8, 22)  # phone alerts are also said out loud at home in these hours
 ALL_DAY_TIME = 9  # an all-day deadline counts as due at 9 am for reminders
 TODO_REMIND_DAYS = {"work": 2, "other": 1}  # todo reminders start this many days before the due day
 TODO_REMIND_BEFORE = timedelta(hours=2)  # and one comes this long before a due with a time
@@ -368,10 +365,14 @@ def _contact_names():
 def check_email(state, now):
     found = gmail.search_email(EMAIL_QUERY, 20)
     emails = found["emails"] if isinstance(found, dict) else []
-    first_run = "emails_seen" not in state
+    # The first run for an account (Gmail, or Zoho once it's set up) only learns what's
+    # already there. State from before Zoho has seen Gmail.
+    accounts = set(state.get("email_accounts", ["gmail"] if "emails_seen" in state else []))
+    searched = {"gmail", "zoho"} if zoho.enabled() else {"gmail"}
+    searched -= set(found.get("unavailable", {})) if isinstance(found, dict) else set()
     seen = set(state.get("emails_seen", []))
-    new = [e for e in emails if e["id"] not in seen]
-    if new and not first_run:  # the first run only learns what's already there
+    new = [e for e in emails if e["id"] not in seen and e["account"] in accounts]
+    if new:
         listing = json.dumps([{k: e[k] for k in ("id", "from", "subject", "date", "snippet")}
                               for e in new], ensure_ascii=False)
         answer = _claude(EMAIL_JUDGE.format(contacts=_contact_names()), listing, 600)
@@ -390,6 +391,7 @@ def check_email(state, now):
         state["flagged"] = [f for f in flagged
                             if datetime.fromisoformat(f["at"]) > now - timedelta(days=2)]
     state["emails_seen"] = (list(seen | {e["id"] for e in emails}))[-500:]
+    state["email_accounts"] = sorted(accounts | searched)
 
 
 # --- power ---------------------------------------------------------------------------------
@@ -424,26 +426,6 @@ def check_power(state, now):
     if due and was == "battery":
         notify.post(f"🪫 Battery is at {percent}%. Jarvis stops when it runs out.")
     state["power"], state["battery_warned"] = "battery", sorted(warned | set(due))
-
-
-def check_phone(state, now):
-
-    if b is None:
-        return
-    warned = set(state.get("phone_warned", []))
-    if b["charging"]:
-        warned = set()
-    else:
-        warned = {w for w in warned if b["percent"] <= w + PHONE_REARM_ABOVE}
-        due = [w for w in config.PHONE_WARN_AT if b["percent"] <= w and w not in warned]
-        if due:
-            # Spoken only, never posted in Discord (the owner asked).
-            text = f"Sir, your phone is at {b['percent']}% and isn't charging."
-            if (now.hour in PHONE_SPOKEN_HOURS and notify.available("voice")
-                    and not dnd.active()):
-                notify.send("voice", text)
-            warned |= {w for w in config.PHONE_WARN_AT if b["percent"] <= w}
-    state["phone_warned"] = sorted(warned)
 
 
 # --- Spotify speaker ------------------------------------------------------------------------
@@ -655,9 +637,10 @@ def run():
         time.sleep(5)  # everything here is posted in Discord
     while True:
         state, now = _load(), datetime.now(TZ)
-        for name, check, every in (("briefing", check_briefing, 0),
+        for name, check, every in (("projects", project.check_scheduled, 0),  # delayed ones
+                                   ("briefing", check_briefing, 0),
                                    ("power", check_power, 0),
-                                   ("phone", check_phone, PHONE_EVERY),
+                                   *extras.checks(),
                                    ("soloist", check_soloist, SOLOIST_EVERY),
                                    ("reminders", check_reminders, REMINDER_EVERY),
                                    ("onq", check_onq, ONQ_EVERY),
@@ -680,7 +663,7 @@ def start():
 
 
 if __name__ == "__main__":
-    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|todos|email|intake|phone]
+    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|todos|email|intake]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
     import sys
     now = datetime.now(TZ)
@@ -729,8 +712,6 @@ if __name__ == "__main__":
         print(_claude(EMAIL_JUDGE.format(contacts=_contact_names()), listing, 600) if emails else "No unread email.")
         for e in emails:
             print(e["id"], "|", e["from"], "|", e["subject"])
-    elif what == "phone":
-
     elif what == "intake":
         new, picks = intake.preview(_load(), now)
         print("New:", json.dumps(new))

@@ -17,16 +17,11 @@ from datetime import datetime
 import numpy as np
 import sounddevice as sd
 
-
+from jarvis import (alarms, audio, config, events, extras, latency, learn, llm, notify, project,
                     routines, stt, tools, tts)
-
+from jarvis.tools import dnd, kasa, spotify
 from jarvis.tools.clock import TZ
 from jarvis.wakeword import WakeWord
-
-try:  # extra wake words that act without a sound, in the gitignored private/ (its README.md)
-    from private import wake_words as private_wake_words
-except ImportError:
-    private_wake_words = None
 
 log = logging.getLogger("jarvis.voice")
 
@@ -161,10 +156,35 @@ _END_PROJECT = re.compile(_FILLER + r"(?:end|close|exit|leave|quit|stop|finish|t
 # no trip to Claude for a "Yes, sir?".
 _WAKE_ONLY = re.compile(r"(?:(?:hey|hi|ok|okay|yo) )?jarvis(?: jarvis)*")
 WOKEN = "woken"  # handle()'s answer for it
+# "Hey Jarvis" while Jarvis talks stops it, like "stop", then "Sir?" and listening, with no
+# wake word needed. _speak's stopped and handle()'s answer when that happened.
+BARGED_IN = "barged in"
+_wake = None  # run()'s WakeWord, listening while Jarvis talks too
 
 
 def is_wake_only(text):
     return bool(_WAKE_ONLY.fullmatch(_words(text)))
+
+
+# "Hey Jarvis, never mind": nothing is said and the conversation ends (the end chime, as when
+# nothing is said after the wake word). Like repeat requests, the whole utterance must match,
+# so "never mind the weather, what time is it" and "cancel my alarm" are handled as usual.
+_CANCEL_FILLER = r"(?:hey |hi |ok |okay |oh |ah |actually |sorry |um |uh |er |wait |oops |" \
+                 r"jarvis |sir |no |)*"
+_CANCEL_END = r"(?: then| now| for now| please| sorry| sir| jarvis| thanks| thank you)*"
+_CANCEL = re.compile(_CANCEL_FILLER + r"(?:never ?mind|cancel(?: that| it| this)?|"
+                     r"forget (?:about )?(?:it|that)|stop|don t worry(?: about it)?|"
+                     r"(?:it )?doesn t matter|(?:it s )?not important|i changed my mind)"
+                     + _CANCEL_END)
+# These too, unless they answer a question Jarvis just asked ("Shall I send it?" "No.").
+_DECLINE = re.compile(_CANCEL_FILLER + r"(?:no|nope|nothing|not now)" + _CANCEL_END)
+
+
+def is_cancel(text, answering=False):
+    """Whether text is only "never mind" or the like. answering: it answers Jarvis's question,
+    so a bare "no" or "nothing" is the answer, not a cancel."""
+    words = _words(text)
+    return bool(_CANCEL.fullmatch(words) or (not answering and _DECLINE.fullmatch(words)))
 
 
 # "Hey Jarvis, ..." or "Jarvis, ..." in the follow-up window is plainly meant for Jarvis, so
@@ -303,6 +323,7 @@ def _is_echo(clip, reply):
     getting past the canceller (Vosk heard "but it stays" as "stop"). Whisper hears words far
     better: if it hears no stop word there, but mostly words from reply, it was echo."""
     text = stt.transcribe(clip.astype(np.float32) / 32768)
+    events.whisper_heard(text)
     words = _word_list(text)
     if _STOP_WORDS & set(words):
         return False
@@ -323,17 +344,32 @@ def _is_echo(clip, reply):
     return False
 
 
-def _listen_for_stop(mic, stop, done, saying, reply):
+def _listen_for_stop(mic, stop, done, saying, reply, wake=None):
     """While Jarvis talks, listen on the (echo-cancelled) mic for "stop" or "cancel" and set
     stop when heard. saying() is what Jarvis is saying now, reply() the whole reply so far.
-    Runs until done is set."""
+    With wake (a WakeWord), "Hey Jarvis" sets stop too, with stop.woken. Runs until done is
+    set."""
     rec, heard, rec_start = _stop_recognizer(), [], 0  # rec_start: samples heard before rec
+    if wake is not None:
+        wake.reset()
     try:
         while not done.is_set():
             block = mic.read(timeout=0.1)
             if block is None:
                 continue
             heard.append(block)
+            if wake is not None and (score := wake.heard(block)) is not None:
+                # Jarvis's own "Jarvis" can get past the canceller, so not if it's said it.
+                if "jarvis" in _word_list(reply()) or mic.captured < _alert_until:
+                    log.info("wake (score %.2f) while talking, but I said 'Jarvis' myself: "
+                             "ignored", score)
+                    events.stop_event("wake_own_name", score=score)
+                else:
+                    log.info("wake (score %.2f) while talking: stopping to listen", score)
+                    events.stop_event("wake_stopped", score=score)
+                    stop.woken = True
+                    stop.set()
+                    return
             # Act on the partial result too: Vosk only finishes an utterance after a pause,
             # which may not come while Jarvis is still talking.
             if rec.AcceptWaveform(block.tobytes()):
@@ -351,19 +387,25 @@ def _listen_for_stop(mic, stop, done, saying, reply):
                 # phrase's own words count here: the "sir" of an echoed "yes sir" is no reason.
                 if set(_word_list(saying())) & set(phrase.split()):
                     log.info("heard %r, but I just said it myself: ignored", text)
+                    events.stop_event("own_words", text, phrase)
                     rec, rec_start = _stop_recognizer(), sum(map(len, heard))
                     continue
                 if _is_echo(_stop_clip(heard, rec_start, result, phrase), reply()):
+                    events.stop_event("echo", text, phrase)
                     rec, rec_start = _stop_recognizer(), sum(map(len, heard))
                     continue
                 log.info("heard %r: stopping", text)
+                events.stop_event("stopped", text, phrase)
                 stop.heard = text
                 stop.set()
                 return
             if text and text != getattr(rec, "_logged", None):
                 rec._logged = text
                 log.info("heard %r while talking (not a stop)", text)
+                events.stop_event("not_a_stop", text)
     finally:
+        if wake is not None:
+            wake.reset()  # Jarvis's voice mustn't count towards the next "Hey Jarvis"
         if config.SAVE_STOP_AUDIO and heard:
             path = config.ROOT / "data" / f"stop-listen-{time.strftime('%H%M%S')}.wav"
             path.parent.mkdir(exist_ok=True)
@@ -425,7 +467,7 @@ def _asked_please(request):
     log.info("said %r after a task; waiting for please", SAY_PLEASE)
 
 
-# "Text Hyde" with no message: Jarvis asks what it should say, and the answer is the message.
+# "Text Sam" with no message: Jarvis asks what it should say, and the answer is the message.
 # Left to Claude, a third of the time it took the answer ("This is funny") for a comment, or
 # said it had drafted it without doing so. Asked as one request, it drafts it every time.
 _TEXT_WHO = re.compile(r"^(?:(?:hey |ok |okay )?jarvis[,.]? )?(?:can you |could you |please )?"
@@ -439,10 +481,7 @@ def _contact_only(text):
     """The contact's name if text is just "Text <contact>", else None."""
     if not (m := _TEXT_WHO.match(text.strip())) or len(m[1].split()) > 3:
         return None
-    try:
-        return None
-    except ValueError:
-        return None  # not a contact (or several): Claude sorts it out
+    return extras.contact_name(m[1])  # None: not a contact (or several), so Claude sorts it out
 
 
 _unfinished = None  # (texts, index of the sentence cut off) after "stop", for "continue"
@@ -457,23 +496,26 @@ def _post_quietly(text):
 def _speak(mic, texts, thinking=False, timing=None, stop=None):
     """Speak texts (a list, or _Sentences still streaming in), stopping if the owner says stop.
     thinking plays the thinking sound while waiting on texts; timing is a latency.Turn. Returns
-    (time speech started or None, whether it was stopped). When stopped, remembers where, so
-    "continue" can resume."""
+    (time speech started or None, whether it was stopped: BARGED_IN if by "Hey Jarvis"). When
+    stopped, remembers where, so "continue" can resume."""
     global _unfinished
     stop, done = stop or threading.Event(), threading.Event()
     saying = ((lambda: " ".join(texts.spoken[-2:])) if isinstance(texts, _Sentences)
               else (lambda: " ".join(texts)))
     reply = ((lambda: " ".join(texts.spoken)) if isinstance(texts, _Sentences)
              else (lambda: " ".join(texts)))
-    listener = threading.Thread(target=_listen_for_stop, args=(mic, stop, done, saying, reply),
+    # Not over a ringing alarm: there "Hey Jarvis" is _alarm_mode's.
+    wake = None if alarms.ringing() else _wake
+    listener = threading.Thread(target=_listen_for_stop,
+                                args=(mic, stop, done, saying, reply, wake),
                                 name="stop", daemon=True)
     listener.start()
     try:
         played = []
         first = tts.speak_all(texts, stop=stop, thinking=thinking, played=played, timing=timing)
-        if stop.is_set():
+        if stopped := stop.is_set():
             _unfinished = (texts, max(len(played) - 1, 0))
-        return first, stop.is_set()
+        return first, BARGED_IN if stopped and getattr(stop, "woken", False) else stopped
     finally:
         done.set()
         listener.join()
@@ -497,19 +539,27 @@ def _continue(mic, timing):
     if stopped:  # _speak remembered the new place within rest; make it within the whole reply
         _unfinished = (texts, start + _unfinished[1])
         mic.clear()
-        return False
+        return BARGED_IN if stopped == BARGED_IN else False
     _last_reply = " ".join(texts)
     mic.clear()
     return True
 
 
+def _answered(stopped):
+    """handle()'s answer once a reply is said: True, False if stopped, BARGED_IN if "Hey
+    Jarvis" stopped it."""
+    return BARGED_IN if stopped == BARGED_IN else not stopped
+
+
 def handle(mic, brain, utterance, follow_up=False):
     """Transcribe, ask Claude, speak. Returns False if there was nothing to answer."""
     turn = latency.Turn(utterance, follow_up)
+    events.set_state("thinking")
     try:
         return _answer(mic, brain, utterance, follow_up, turn)
     finally:
         turn.finish()  # logs where the time went
+        events.set_state("idle")
 
 
 def _answer(mic, brain, utterance, follow_up, turn):
@@ -521,11 +571,19 @@ def _answer(mic, brain, utterance, follow_up, turn):
         turn.outcome = "nothing heard"
         return False
     log.info("you: %s", text)
-
+    text = spotify.fix_playlists(extras.fix_transcript(text))
     if is_wake_only(text):
         log.info("just the wake word: listening again")
         turn.outcome = "woken again"
         return WOKEN
+    # Not while an alarm rings, where "cancel" turns it off (jarvis.alarms).
+    answering = follow_up and not _texting and _last_reply and "?" in _last_reply
+    if not alarms.ringing() and is_cancel(text, answering):
+        log.info("never mind: nothing to do")
+        _texting = _awaiting_please = None
+        alarms.drop_pending("voice")  # "Which one?" asked about cancelling alarms
+        turn.outcome = "cancelled"
+        return False
     note = None  # for Claude, this turn only
     if _texting:
         to, _texting = _texting, None
@@ -535,8 +593,11 @@ def _answer(mic, brain, utterance, follow_up, turn):
         log.info("text to %s: asking what it should say (local)", to)
         reply = "What should it say, sir?"
         with _speaker:
-            _speak(mic, [reply], timing=turn)
+            _, stopped = _speak(mic, [reply], timing=turn)
         mic.clear()
+        if stopped == BARGED_IN:
+            turn.outcome = "stopped"
+            return BARGED_IN
         _texting, _last_reply = to, reply
         turn.reply, turn.outcome = reply, "asked for the message"
         return True
@@ -549,8 +610,11 @@ def _answer(mic, brain, utterance, follow_up, turn):
             note, follow_up = "", False  # "": no PLEASE_NOTE this time
         elif follow_up and waiting["asks"] < PLEASE_ASKS:
             with _speaker:  # no please yet: keep waiting
-                _speak(mic, [SAY_PLEASE], timing=turn)
+                _, stopped = _speak(mic, [SAY_PLEASE], timing=turn)
             mic.clear()
+            if stopped == BARGED_IN:
+                turn.outcome = "stopped"
+                return BARGED_IN
             _awaiting_please = dict(waiting, asks=waiting["asks"] + 1)
             turn.outcome = "still waiting for please"
             return True
@@ -566,7 +630,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
         mic.clear()
         _last_reply = turn.reply = reply
         turn.outcome = "stopped" if stopped else "alarm (local)"
-        return not stopped
+        return _answered(stopped)
     if follow_up and _ADDRESSED.match(text):
         follow_up = False  # "Jarvis, ..." is meant for Jarvis
     if follow_up and _last_reply and "?" in _last_reply:
@@ -580,10 +644,10 @@ def _answer(mic, brain, utterance, follow_up, turn):
             _, stopped = _speak(mic, [_last_reply], timing=turn)
         mic.clear()
         turn.reply, turn.outcome = _last_reply, "stopped" if stopped else "repeated"
-        return not stopped
+        return _answered(stopped)
     if _unfinished and is_continue_request(text):
         done = _continue(mic, turn)
-        turn.outcome = "continued" if done else "stopped"
+        turn.outcome = "continued" if done is True else "stopped"
         return done
     _unfinished = None  # a new request: whatever was cut off before is dropped
     # Goodnight and good morning (jarvis.routines): not in the follow-up window, where it may
@@ -596,8 +660,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
             alarms.stop()
             routines.pending.set()  # the voice loop runs it once the alarm has stopped
             return False
-        _good_morning(mic)
-        return False
+        return BARGED_IN if _good_morning(mic) == BARGED_IN else False
     # Not in the follow-up window, where it may be someone else asking: Claude judges that.
     # Lights on or off is the same request whoever says it.
     if (on := dnd.request(text)) is not None:
@@ -614,7 +677,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
         _last_reply = turn.reply = reply
         turn.outcome = "stopped" if stopped else "answered locally"
         learn.log_exchange("voice", text, reply, [reply], [], follow_up)
-        return not stopped
+        return _answered(stopped)
     # With a project open, Claude still hears everything first: it passes on what's about the
     # project's work (project_message) and answers the rest itself.
     p = project.voice_project()
@@ -623,7 +686,13 @@ def _answer(mic, brain, utterance, follow_up, turn):
     sentences, result = _Sentences(), {}
     if note is None and _TASK.match(text) and _please_roll(text):
         note = PLEASE_NOTE
-    context = "\n\n".join(c for c in (project.context(p) if p else None, note) if c) or None
+    # A delayed project that ran while the owner was away (in Discord only): mentioned once.
+    overnight = None if follow_up or note == PLEASE_NOTE else project.news()
+    if overnight:
+        overnight = ("The owner hasn't heard this yet; tell them in a short sentence, then "
+                     "answer: " + " ".join(overnight))
+    context = "\n\n".join(c for c in (project.context(p) if p else None, note, overnight)
+                          if c) or None
 
     def think():
         try:
@@ -645,7 +714,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
             # "Stop" or "cancel": Claude may still be writing, but nobody wants the rest.
             turn.outcome = "stopped"
             mic.clear()
-            return False
+            return _answered(stopped)
         thinker.join()
         if "error" in result:
             raise result["error"]
@@ -659,7 +728,7 @@ def _answer(mic, brain, utterance, follow_up, turn):
             if stopped:
                 mic.clear()
                 turn.outcome = "stopped"
-                return False
+                return _answered(stopped)
     _last_reply = turn.reply = " ".join(sentences.spoken) or reply
     turn.outcome = "answered"
     if note == PLEASE_NOTE and _last_reply.strip().lower() == SAY_PLEASE.lower():
@@ -705,7 +774,8 @@ def _goodnight(mic, turn):
 
 def _good_morning(mic):
     """The good morning routine (jarvis.routines): do not disturb off, lights on, good
-    morning and the briefing. "Stop" cuts the talking short."""
+    morning and the briefing. "Stop" cuts the talking short. Returns BARGED_IN if "Hey
+    Jarvis" did."""
     said, stopped = [], False
 
     def speak(texts):
@@ -726,58 +796,22 @@ def _good_morning(mic):
     finally:
         spotify.duck(False)
         mic.clear()
+    return stopped
 
 
 def _speak_updates(mic):
-    """Say what a project has queued to say, between conversations."""
+    """Say what a project has queued to say, between conversations. Returns BARGED_IN if
+    "Hey Jarvis" stopped it."""
     global _last_reply
     lines = []
     while not project.speech.empty():
         lines.append(project.speech.get_nowait())
     log.info("project says: %s", " ".join(lines))
     with _speaker:
-        _speak(mic, lines)
+        _, stopped = _speak(mic, lines)
     _last_reply = " ".join(lines)
     mic.clear()
-
-
-
-_claps_ignored_until = 0.0  # perf_counter time
-
-
-
-
-
-    unnoticed."""
-    global _claps_ignored_until
-
-
-    if not matched:
-
-                 repr(text) if text else "nothing said")
-        mic.clear()
-        return
-
-    said, stopped = [], False
-
-    def speak(texts):
-        global _last_reply
-        nonlocal stopped
-        if stopped:  # "stop" ends the talking for the rest of the sequence
-            return
-        with _speaker:
-            _, stopped = _speak(mic, texts)
-        said.extend(texts)
-        _last_reply = " ".join(said)
-        mic.clear()
-
-    spotify.duck(True)
-    try:
-
-    finally:
-        spotify.duck(False)
-
-        mic.clear()
+    return stopped
 
 
 # While an alarm rings, any of these (no wake word needed) turns it off, or snoozes it.
@@ -859,8 +893,53 @@ def _alarm_request(mic, wake, brain):
         mic.clear()
 
 
+def _sir(mic):
+    """ "Hey Jarvis" stopped Jarvis talking: "Sir?", then the request (no wake word needed), or
+    None if nothing is said. Spoken without _speak, so "Sir?" can't stop itself."""
+    with _speaker:
+        tts.speak_all(["Sir?"])
+    mic.clear()  # Jarvis's "Sir?" and the rest of the owner's "Hey Jarvis"
+    return audio.record_utterance(mic, stt.transcribe)
+
+
+def _converse(mic, brain, utterance):
+    """Answer utterance, then follow-ups without the wake word until nothing more is said,
+    then the end chime."""
+    if utterance is None:
+        log.info("no request after the wake word")
+    follow_up = False
+    # Follow-up window: after a reply, listen again without needing the wake word.
+    # Claude decides whether what it hears there was meant for Jarvis.
+    while utterance is not None:
+        answered = handle(mic, brain, utterance, follow_up)
+        if answered == WOKEN:  # just "Hey Jarvis" again: chime and listen, as for a wake
+            play(CHIME)
+            utterance, follow_up = audio.record_utterance(mic, stt.transcribe), False
+            continue
+        if answered == BARGED_IN:  # "Hey Jarvis" over the reply: "Sir?" and listen
+            utterance, follow_up = _sir(mic), False
+            continue
+        if not answered:
+            break
+        utterance = audio.record_utterance(mic, stt.transcribe,
+                                           wait_seconds=config.FOLLOW_UP_SECONDS)
+        follow_up = True
+    play(END_CHIME)
+    spotify.duck(False)
+    mic.clear()
+
+
+def _barged_in(mic, brain):
+    """ "Hey Jarvis" over something said between conversations: a conversation, from "Sir?"."""
+    spotify.duck(True)
+    threading.Thread(target=brain.prewarm, name="prewarm", daemon=True).start()
+    _converse(mic, brain, _sir(mic))
+
+
 def run():
+    global _wake
     wake, brain = WakeWord(), llm.Brain("voice")
+    _wake = wake
     tools.warm_up()
     stt.warm_up()
     tts.get_voice()
@@ -868,79 +947,57 @@ def run():
     notify.register("voice", say)
     alarms.on_stop.append(routines.alarm_stopped)  # a morning alarm turned off: good morning
     spotify.duck(False)  # music left turned down by a crash comes back up
-
-
-    silent = private_wake_words.load() if private_wake_words else []
-
+    # Silent listeners (private/, jarvis/extras.py) need no wake word: they hear every block.
+    silent = extras.listeners()
+    events.start(alarms.ringing)
     with audio.Mic() as mic:
-        log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)%s%s", config.WAKE_THRESHOLD,
-
-                 f" and {len(silent)} silent wake word(s)" if silent else "")
+        log.info("ready, listening for 'Hey Jarvis' (threshold %.2f)%s", config.WAKE_THRESHOLD,
+                 f" and {len(silent)} silent listener(s)" if silent else "")
         while True:
-            for listener in listeners:
+            events.set_state("idle")
+            for listener in silent:
                 listener.reset()  # the mic was read elsewhere since: what came before doesn't count
             score = wake.wait(mic, interrupt=lambda: (alarms.ringing()
                                                       or routines.pending.is_set()
                                                       or not project.speech.empty()),
                               # A list, not a generator: every listener must hear every block.
-                              also=listeners and (lambda block: any([listener.heard(block)
-                                                                     for listener in listeners])))
+                              also=silent and (lambda block: any([listener.heard(block)
+                                                                  for listener in silent])))
             if score is None and alarms.ringing():
                 _alarm_mode(mic, wake, brain)
                 continue  # a morning alarm turned off: good morning, next time round
             if score is None and routines.pending.is_set():
-                _good_morning(mic)
+                if _good_morning(mic) == BARGED_IN:
+                    _barged_in(mic, brain)
                 continue
             if score is None and (fired := next((s for s in silent if s.fired), None)):
                 if mic.captured < _alert_until:
                     log.info("%s during an alert: ignored", fired.name)
                 else:
                     try:
-                        fired.handle(mic)
+                        stopped = fired.handle(mic)
                     except Exception:
                         log.exception("%s failed", fired.name)
+                        stopped = None
                     mic.clear()
-                continue
-
-                if mic.captured < _alert_until:
-
-                elif mic.captured < _claps_ignored_until:
-
-
-                else:
-
-
+                    if stopped == BARGED_IN:
+                        _barged_in(mic, brain)
                 continue
             if score is None:  # a project has something to say
-                _speak_updates(mic)
+                if _speak_updates(mic) == BARGED_IN:
+                    _barged_in(mic, brain)
                 continue
             if mic.captured < _alert_until:
                 # An alert can name the project "jarvis"; don't wake on it.
                 log.info("wake (score %.2f) during an alert: ignored", score)
+                events.wake_ignored("during an alert")
                 continue
             log.info("wake (score %.2f)", score)
+            events.set_state("listening")
             spotify.duck(True)  # music on Jarvis's speaker turned down until the end chime
             # While the owner talks, get Claude's cache ready for the conversation so far.
             threading.Thread(target=brain.prewarm, name="prewarm", daemon=True).start()
             play(CHIME)
-            utterance = audio.record_utterance(mic, stt.transcribe, preroll=wake.preroll)
-            if utterance is None:
-                log.info("no request after the wake word")
-            follow_up = False
-            # Follow-up window: after a reply, listen again without needing the wake word.
-            # Claude decides whether what it hears there was meant for Jarvis.
-            while utterance is not None:
-                answered = handle(mic, brain, utterance, follow_up)
-                if answered == WOKEN:  # just "Hey Jarvis" again: chime and listen, as for a wake
-                    play(CHIME)
-                    utterance, follow_up = audio.record_utterance(mic, stt.transcribe), False
-                    continue
-                if not answered:
-                    break
-                utterance = audio.record_utterance(mic, stt.transcribe,
-                                                   wait_seconds=config.FOLLOW_UP_SECONDS)
-                follow_up = True
-            play(END_CHIME)
-            spotify.duck(False)
-            mic.clear()
+            _converse(mic, brain,
+                      audio.record_utterance(mic, stt.transcribe, preroll=wake.preroll))
 

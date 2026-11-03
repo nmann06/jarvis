@@ -9,7 +9,7 @@ import numpy as np
 import sounddevice as sd
 from faster_whisper.vad import get_vad_model
 
-from jarvis import config
+from jarvis import config, events
 
 SAMPLE_RATE = 16000
 BLOCK = 1280  # 80 ms, the frame size openWakeWord is built around
@@ -35,7 +35,7 @@ class Mic:
                                       callback=self._callback)
 
     def _callback(self, data, frames, time_info, status):
-        self._queue.put((time.perf_counter(), data[:, 0].copy()))
+        self._queue.put((time.perf_counter(), events.mic_block(data[:, 0].copy())))
 
     def __enter__(self):
         self._stream.start()
@@ -127,6 +127,7 @@ def record_utterance(mic, transcribe, wait_seconds=5.0, preroll=(), max_seconds=
     """
     # Only new blocks are judged, so the tail of "Jarvis" in the preroll can't count as the
     # request starting. Time is counted in blocks rather than by the clock.
+    events.set_state("listening")
     preroll = list(preroll)
     new, started, quiet, speech_end, early = [], False, 0.0, None, None
     block_seconds = BLOCK / SAMPLE_RATE
@@ -140,6 +141,7 @@ def record_utterance(mic, transcribe, wait_seconds=5.0, preroll=(), max_seconds=
             if p >= config.SPEECH_THRESHOLD:
                 started, speech_end = True, mic.captured
             elif len(new) * block_seconds > wait_seconds:
+                events.set_state("idle")
                 return None
         # Silero dips between words, so only a sustained low score counts as the end.
         elif p >= config.SPEECH_THRESHOLD * 0.7:

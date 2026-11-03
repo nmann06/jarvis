@@ -9,7 +9,7 @@ import numpy as np
 import sounddevice as sd
 from piper import PiperVoice, SynthesisConfig
 
-from jarvis import config
+from jarvis import config, events
 
 _voice = None
 THINKING_AFTER = 0.5  # seconds of silence while waiting before the thinking sound starts
@@ -101,6 +101,7 @@ def speak_all(texts, stop=None, thinking=False, played=None, timing=None):
             hum_at = 0  # the next wait starts the sound from the top
             if first is None:
                 first = time.perf_counter()
+                events.speaking(True)
                 if timing:  # the sound card's buffer holds it back by about out.latency
                     timing.mark("sound", first + out.latency)
             for i in range(0, len(chunk), slice_):
@@ -109,6 +110,8 @@ def speak_all(texts, stop=None, thinking=False, played=None, timing=None):
                     break
                 out.write(chunk[i:i + slice_].reshape(-1, 1))
             quiet_since = time.perf_counter()
+    if first is not None:
+        events.speaking(False)
     return first
 
 

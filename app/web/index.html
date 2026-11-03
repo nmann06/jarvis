@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="referrer" content="no-referrer">
+<title>Jarvis Panel</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23ffb020'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="shell">
+  <header class="side">
+    <div class="brand">
+      <span id="brand-light" class="light small" data-state="unknown" role="img" aria-label="Light: unknown"></span>
+      <span class="brand-name">Jarvis</span>
+    </div>
+    <nav id="nav" aria-label="Pages"></nav>
+    <div id="conn" class="conn" role="status"></div>
+  </header>
+  <main id="main" tabindex="-1">
+    <div id="banner" class="banner-slot"></div>
+    <div id="page"></div>
+  </main>
+</div>
+<div id="restart-bar" class="restart-bar" hidden role="region" aria-label="Restart needed"></div>
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+<dialog id="dialog" class="dialog" aria-labelledby="dialog-title"></dialog>
+<noscript><p class="noscript">The Jarvis Panel needs JavaScript.</p></noscript>
+<script type="module" src="app.js"></script>
+</body>
+</html>

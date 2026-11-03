@@ -3,11 +3,12 @@ jarvis-wrapper): each setting's category, kind, default and what it does, read f
 written to .env. Do not disturb is here too, kept in data/dnd.json (jarvis/tools/dnd.py).
 
 Secrets (keys, tokens, passwords) are only ever reported as set or not: their values are
-never printed, and they can't be changed from here (edit .env).
+never printed, and they can't be changed from here (edit .env, or the Jarvis Panel's
+set_secret).
 
     python -m jarvis.settings list              every setting as JSON, with its value now
     python -m jarvis.settings set KEY VALUE     change one ("" or "default" for the default)
-    python -m jarvis.settings restart           restart Jarvis, so .env changes take effect
+    python -m jarvis.settings restart           check .env, then restart Jarvis so changes take effect
 
 .env changes take effect when Jarvis restarts; do not disturb at once. Doesn't import
 jarvis.config, so a broken .env can still be fixed from here.
@@ -18,20 +19,25 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
+
+from jarvis import extras
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV = ROOT / ".env"
 DND = ROOT / "data" / "dnd.json"
 
-CATEGORIES = ["Claude", "Voice", "Listening", "Speech recognition", "Do not disturb", "Alarms",
-
-
-
 def S(key, category, label, kind, default, about, choices=None, secret=False):
     return {"key": key, "category": category, "label": label, "kind": kind, "default": default,
             "about": about, "choices": choices, "secret": secret}
+
+
+_EXTRA = extras.more_settings(S)  # those of the gitignored private/, if it has any
+CATEGORIES = ["Claude", "Voice", "Listening", "Speech recognition", "Do not disturb", "Alarms",
+              *_EXTRA.get("categories", []), "Discord", "Calendar & briefing", "Services",
+              "Accounts & keys"]
 
 
 SETTINGS = [
@@ -102,24 +108,6 @@ SETTINGS = [
     S("ALARM_SNOOZE_MINUTES", "Alarms", "Snooze (minutes)", "int", "9", "How long a snooze lasts"),
     S("ALARM_BEFORE_FIRST_EVENT", "Alarms", "Before the first event (minutes)", "int", "30",
       "Jarvis warns if a morning alarm is closer than this to the day's first event (not classes)"),
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # Phone
-    S("PHONE_WARN_AT", "Phone", "Battery alerts at (%)", "text", "20,10",
-      "Percentages to warn at while the phone isn't charging, comma separated"),
-
-      "Empty for your own iPhone"),
     # Discord
     S("DISCORD_CHANNEL", "Discord", "Channel", "text", "jarvis",
       "Jarvis answers everything here and posts alerts here"),
@@ -139,17 +127,21 @@ SETTINGS = [
       "Spotify device music plays on unless you name another"),
     S("ONEDRIVE_TENANT", "Services", "OneDrive accounts", "text", "common",
       "common, consumers, organizations, or a tenant such as queensu.ca"),
-
     S("GOOGLE_SHEET_ID", "Services", "Job-search sheet", "text", "", "Google Sheet id, from its URL"),
+    S("ZOHO_IMAP_HOST", "Services", "Zoho IMAP server", "text", "imappro.zohocloud.ca",
+      "IMAP server of your Zoho data centre"),
     S("MCP_PORT", "Services", "MCP port", "int", "8766", "Local port Tailscale Funnel forwards to"),
-] + [S(key, "Accounts & keys", label, "secret", "", "Change it in ~/jarvis/.env", secret=True)
+    S("PANEL_PORT", "Services", "Panel port", "int", "8767",
+      "Port of the Jarvis Panel; restart jarvis-panel to apply"),
+] + _EXTRA.get("settings", []) + [S(key, "Accounts & keys", label, "secret", "", "Change it in ~/jarvis/.env", secret=True)
      for key, label in [("ANTHROPIC_API_KEY", "Anthropic API key"), ("DISCORD_TOKEN", "Discord bot token"),
                         ("DISCORD_OWNER_ID", "Discord owner ID"), ("MCP_TOKEN", "MCP token"),
                         ("ICLOUD_USER", "iCloud user"), ("ICLOUD_APP_PASSWORD", "iCloud app password"),
                         ("TRELLO_KEY", "Trello key"), ("TRELLO_TOKEN", "Trello token"),
                         ("SPOTIFY_CLIENT_ID", "Spotify client ID"), ("ONEDRIVE_CLIENT_ID", "OneDrive client ID"),
                         ("SMITH_USER", "Smith Learning user"), ("SMITH_PASSWORD", "Smith Learning password"),
-                        ("KASA_USER", "Kasa user"), ("KASA_PASSWORD", "Kasa password")]]
+                        ("KASA_USER", "Kasa user"), ("KASA_PASSWORD", "Kasa password"),
+                        ("ZOHO_USER", "Zoho address"), ("ZOHO_APP_PASSWORD", "Zoho app password")]]
 BY_KEY = {s["key"]: s for s in SETTINGS}
 
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
@@ -200,6 +192,34 @@ def listing():
     return {"categories": CATEGORIES, "settings": out, "env": str(ENV)}
 
 
+# What each number may be. jarvis.config reads them all when Jarvis starts, and the alarm runs in
+# that process; these also catch nan and inf, which float() accepts.
+RANGES = {
+    "HISTORY_CHARS": (1000, 4000000), "TTS_LENGTH_SCALE": (0.1, 5), "TTS_VOLUME": (0, 4),
+    "SAY_PLEASE_RATE": (0, 1), "WAKE_THRESHOLD": (0.01, 1), "SILENCE_SECONDS": (0.1, 10),
+    "QUICK_SILENCE_SECONDS": (0.1, 10), "FOLLOW_UP_SECONDS": (0, 60),
+    "MAX_UTTERANCE_SECONDS": (1, 120), "SPEECH_THRESHOLD": (0.01, 1), "WHISPER_THREADS": (1, 64),
+    "ALARM_RING_MINUTES": (1, 240), "ALARM_RAMP_MINUTES": (0.1, 240),
+    "ALARM_START_VOLUME": (0, 100), "ALARM_MIN_VOLUME": (0, 100), "ALARM_SNOOZE_MINUTES": (1, 120),
+    "ALARM_BEFORE_FIRST_EVENT": (0, 240), "BRIEFING_BEFORE_ALARM": (0, 240),
+    "MCP_PORT": (1024, 65535), "PANEL_PORT": (1024, 65535), **_EXTRA.get("ranges", {}),
+}
+_OPEN_CHOICES = {"CLAUDE_MODEL", "PROJECT_MODEL", "WHISPER_MODEL"}  # other ids work too
+_PORTS = {"MCP_PORT": "PANEL_PORT", "PANEL_PORT": "MCP_PORT"}
+# Characters .env can't hold faithfully as _write_env writes it: python-dotenv reads \\ and ${
+# specially, and a " inside the quotes ends the value.
+_UNSAFE = re.compile(r'["\\\n\r]|\$\{')
+
+
+def _check_number(s, number):
+    low, high = RANGES[s["key"]]
+    if not low <= number <= high:
+        raise ValueError(f"{s['label']} must be from {low} to {high}")
+    other = _PORTS.get(s["key"])
+    if other and str(number) == (env_values().get(other) or BY_KEY[other]["default"]):
+        raise ValueError(f"{s['label']}: {number} is already the {BY_KEY[other]['label']}")
+
+
 def _check(s, value):
     """value as it should be written, or raises ValueError."""
     kind = s["kind"]
@@ -212,12 +232,14 @@ def _check(s, value):
         raise ValueError(f"{s['label']} is on or off")
     if kind in ("int", "float"):
         try:
-            return str(int(value.strip()) if kind == "int" else float(value.strip()))
+            number = int(value.strip()) if kind == "int" else float(value.strip())
         except ValueError:
             raise ValueError(f"{s['label']} must be a {'whole ' if kind == 'int' else ''}number") from None
+        _check_number(s, number)
+        return str(number)
     if kind == "choice" and s["choices"] and value.strip() not in s["choices"]:
         # Other model ids and Whisper models work too: allow anything without spaces.
-        if not re.fullmatch(r"[\w.\-/]+", value.strip()):
+        if s["key"] not in _OPEN_CHOICES or not re.fullmatch(r"[\w.\-/]+", value.strip()):
             raise ValueError(f"{s['label']}: one of {', '.join(s['choices'])}")
     if s["key"] == "BRIEFING_TIME":
         m = re.fullmatch(r"(\d{1,2}):(\d\d)", value.strip())
@@ -227,8 +249,12 @@ def _check(s, value):
         times = [t.strip() for t in value.split(",") if t.strip()]
         if not times or not all(re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", t) for t in times):
             raise ValueError(f"{s['label']}: times like 9:00,17:00 (24-hour)")
+    if (extra := _EXTRA.get("check")) and (checked := extra(s, value)) is not None:
+        return checked
     if "\n" in value:
         raise ValueError("One line only")
+    if _UNSAFE.search(value):
+        raise ValueError(f"{s['label']} can't contain \", \\ or ${{")
     return value.strip()
 
 
@@ -247,10 +273,18 @@ def _write_env(key, value):
         out.append(line)
     if not done and text is not None:
         out.append(f"{key}={text}")
-    tmp = ENV.with_suffix(".tmp")
-    tmp.write_text("\n".join(out) + "\n")
-    os.chmod(tmp, ENV.stat().st_mode & 0o777 if ENV.exists() else 0o600)
-    os.replace(tmp, ENV)
+    mode = ENV.stat().st_mode & 0o777 if ENV.exists() else 0o600
+    # mkstemp: owner only from the start, so secrets are never readable on the way, and a name of
+    # its own, since the panel and the wrapper can both write.
+    fd, tmp = tempfile.mkstemp(dir=ENV.parent, prefix=f"{ENV.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write("\n".join(out) + "\n")
+        os.chmod(tmp, mode)
+        os.replace(tmp, ENV)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def set_setting(key, value):
@@ -274,7 +308,86 @@ def set_setting(key, value):
                        "Restart Jarvis to apply.", "restart": True}
 
 
+def set_secret(key, value):
+    """Write one secret to .env ("" removes it); returns what to tell the owner, never the
+    value."""
+    s = BY_KEY.get(key)
+    if s is None or not s["secret"]:
+        raise ValueError(f"{key} is not a secret setting")
+    value = value.strip()
+    if _UNSAFE.search(value):
+        raise ValueError(f"{s['label']} has a character that can't go in .env from here "
+                         f"(\", \\ or ${{): edit {ENV}")
+    if key == "DISCORD_OWNER_ID" and value and not value.isdigit():
+        # jarvis.config refuses to start on anything else
+        raise ValueError(f"{s['label']} must be your numeric Discord user ID")
+    _write_env(key, value or None)
+    return {"message": f"{s['label']} {'saved' if value else 'removed'}. Restart Jarvis to apply.",
+            "restart": True}
+
+
+CHECK_SECONDS = 30
+# Loads the file settings.ENV names (not always ROOT/.env, under test) instead of config's own.
+# Prints only which setting failed: exception messages can quote the value.
+_CHECK_CODE = r"""
+import json, re, sys, traceback
+import dotenv
+load = dotenv.load_dotenv
+dotenv.load_dotenv = lambda *a, **k: load(sys.argv[1])
+try:
+    import jarvis.config
+    import jarvis.extras
+    jarvis.extras.load_config()  # private/'s settings, if it has any
+except (Exception, SystemExit) as e:
+    key = None
+    frames = [f for f in traceback.extract_tb(e.__traceback__) if f.filename.endswith("config.py")]
+    if frames:
+        lines = open(frames[-1].filename).read().splitlines()[:frames[-1].lineno]
+        for line in reversed(lines):
+            if m := re.search(r'os\.getenv\("(\w+)"', line):
+                key = m[1]
+                break
+    print(json.dumps({"key": key, "type": type(e).__name__}))
+    sys.exit(1)
+"""
+
+
+def _python():
+    venv = ROOT / ".venv" / "bin" / "python"
+    return str(venv) if venv.exists() else sys.executable
+
+
+def check_env():
+    """Whether Jarvis would start on .env, tried in a short subprocess. None if so, otherwise the
+    problem in plain words: which setting, never its value."""
+    env = dict(os.environ)
+    for key in {*BY_KEY, *env_values()}:  # the service doesn't inherit these: .env must decide
+        env.pop(key, None)
+    try:
+        r = subprocess.run([_python(), "-c", _CHECK_CODE, str(ENV)], cwd=ROOT, env=env,
+                           capture_output=True, text=True, timeout=CHECK_SECONDS)
+    except subprocess.TimeoutExpired:
+        return f"Couldn't check .env: it took more than {CHECK_SECONDS} seconds."
+    except OSError as e:
+        return f"Couldn't check .env: {e.strerror or 'the check would not run'}."
+    if r.returncode == 0:
+        return None
+    try:
+        found = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        found = {}
+    key = found.get("key")
+    if key:
+        label = BY_KEY[key]["label"] if key in BY_KEY else key
+        return (f"Jarvis wouldn't start: {key} ({label}) in .env isn't valid. Fix it on the "
+                "Settings page or in .env first.")
+    return (f"Jarvis wouldn't start: its settings failed to load "
+            f"({found.get('type') or 'unknown error'}). Check .env and the panel's log.")
+
+
 def restart():
+    if problem := check_env():
+        raise ValueError(problem)
     r = subprocess.run(["systemctl", "--user", "restart", "jarvis"], capture_output=True, text=True,
                        timeout=60)
     if r.returncode:

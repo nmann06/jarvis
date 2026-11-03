@@ -1,0 +1,12 @@
+[Unit]
+Description=Jarvis Panel (web UI and API for setting up and improving Jarvis)
+
+[Service]
+WorkingDirectory=%h/jarvis
+ExecStart=%h/jarvis/.venv/bin/python -m jarvis.panel
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
