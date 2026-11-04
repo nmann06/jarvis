@@ -16,6 +16,8 @@
   disturb is on. A card for OnQ work that's been submitted isn't reminded, and a card (or a
   new due date) counts from when this check first sees it;
 - important-email alerts: new unread mail that Claude judges worth a ping;
+- job email drafts (jarvis/job_drafts.py): short, casual replies to job emails, saved in
+  Zoho's Drafts for the owner to send;
 - intake (jarvis/intake.py): todos and calendar events picked out of OnQ, email and texts,
   added to Trello and Apple Calendar by themselves, and due dates for todos that need one;
 - power alerts: the laptop went on battery, is running low, or was plugged back in;
@@ -40,7 +42,7 @@ from pathlib import Path
 
 import anthropic
 
-from jarvis import alarms, config, extras, intake, notify, project
+from jarvis import alarms, config, extras, intake, job_drafts, notify, project
 from jarvis.tools import dnd, gmail, icloud_calendar, onq, sheets, trello, weather, zoho
 from jarvis.tools.clock import TZ
 
@@ -646,6 +648,7 @@ def run():
                                    ("onq", check_onq, ONQ_EVERY),
                                    ("todos", check_todos, REMINDER_EVERY),
                                    ("email", check_email, EMAIL_EVERY),
+                                   ("job drafts", job_drafts.check, EMAIL_EVERY),
                                    ("intake", intake.check, intake.EVERY)):
             if time.monotonic() - last.get(name, 0.0) < every:
                 continue
@@ -663,7 +666,7 @@ def start():
 
 
 if __name__ == "__main__":
-    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|todos|email|intake]
+    # Preview without posting: python -m jarvis.proactive [briefing|reminders|onq|todos|email|jobdrafts|intake]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
     import sys
     now = datetime.now(TZ)
@@ -712,6 +715,11 @@ if __name__ == "__main__":
         print(_claude(EMAIL_JUDGE.format(contacts=_contact_names()), listing, 600) if emails else "No unread email.")
         for e in emails:
             print(e["id"], "|", e["from"], "|", e["subject"])
+    elif what == "jobdrafts":
+        drafts = job_drafts.preview(_load(), now)
+        for e, why, text in drafts:
+            print(f"--- {e['from']} | {e['subject']}\n{why}\n\n{text}\n")
+        print("" if drafts else "No job emails to reply to.")
     elif what == "intake":
         new, picks = intake.preview(_load(), now)
         print("New:", json.dumps(new))

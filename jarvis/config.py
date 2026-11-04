@@ -65,6 +65,13 @@ GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")  # job-search sheet, from its
 ZOHO_USER = os.getenv("ZOHO_USER", "")
 ZOHO_APP_PASSWORD = os.getenv("ZOHO_APP_PASSWORD", "")
 ZOHO_IMAP_HOST = os.getenv("ZOHO_IMAP_HOST", "imappro.zohocloud.ca")
+# Replies to job emails drafted in Zoho by themselves (jarvis/job_drafts.py), signed with
+# OWNER_NAME (default: the Zoho address's name part, capitalized)
+JOB_DRAFTS = os.getenv("JOB_DRAFTS", "on").lower() != "off"
+OWNER_NAME = os.getenv("OWNER_NAME", "") or ZOHO_USER.partition("@")[0].capitalize() or "me"
+OWNER_AGE = os.getenv("OWNER_AGE", "")  # so the drafts sound their age; empty: left out
+# The owner's other addresses (e.g. a school one forwarded into Gmail): left off job replies
+OWNER_EMAILS = [a.strip() for a in os.getenv("OWNER_EMAILS", "").split(",") if a.strip()]
 TRELLO_KEY = os.getenv("TRELLO_KEY", "")  # from trello.com/power-ups/admin
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN", "")  # ATTA..., from trello.com/1/authorize
 TRELLO_BOARD = os.getenv("TRELLO_BOARD", "todo")  # main todo board

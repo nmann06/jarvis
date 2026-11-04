@@ -183,6 +183,19 @@ own address, unless you ask for Gmail; a reply is drafted in the account the ema
 4. `systemctl --user restart jarvis`. The first email check only learns what's already in Zoho,
    so old mail doesn't set off alerts.
 
+#### Job email drafts
+
+With Zoho set up, Jarvis drafts replies to job emails by itself (`jarvis/job_drafts.py`): every
+10 minutes it looks at new inbox mail in both accounts, Claude picks the job emails that need an
+answer (recruiters, interview invitations and scheduling, offers, replies to your applications),
+and a short, casual reply in your voice is saved in Zoho's Drafts, threaded onto the original, with
+a note in #jarvis. It never sends. Automated mail (application received, job alerts, rejections)
+and no-reply senders are skipped; anything it doesn't know about you is left as a `[placeholder]`.
+It replies to all (the sender, copying everyone else on the email, minus your own Zoho and Gmail
+addresses and any in `OWNER_EMAILS`). Signed with `OWNER_NAME` (default: the name part of `ZOHO_USER`); `OWNER_AGE`, if set, helps it
+sound your age. `JOB_DRAFTS=off` turns it off.
+Preview without saving: `.venv/bin/python -m jarvis.proactive jobdrafts`.
+
 ### OnQ setup
 
 OnQ (Brightspace) signs in through Microsoft with MFA, so a real Chromium does it once, on this

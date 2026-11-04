@@ -175,11 +175,15 @@ def read(id):
     return _parse(got[uid][1])
 
 
-def draft(to, subject, body, reply_to_id=""):
-    """Save a draft in Zoho's Drafts folder, from the owner's Zoho address."""
+def draft(to, subject, body, reply_to_id="", in_reply_to="", references="", cc=""):
+    """Save a draft in Zoho's Drafts folder, from the owner's Zoho address. reply_to_id threads
+    it onto a Zoho email; in_reply_to and references (the original's Message-ID and References)
+    onto one from elsewhere."""
     msg = EmailMessage()
     msg["From"] = config.ZOHO_USER
     msg["To"] = to
+    if cc:
+        msg["Cc"] = cc
     msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain=config.ZOHO_USER.rpartition("@")[2] or None)
@@ -188,6 +192,9 @@ def draft(to, subject, body, reply_to_id=""):
         if msg_id := _header(original, "message-id"):
             msg["In-Reply-To"] = msg_id
             msg["References"] = f"{_header(original, 'references') or ''} {msg_id}".strip()
+    elif in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = f"{references} {in_reply_to}".strip()
     msg.set_content(body)
     imap = _connect()
     try:
