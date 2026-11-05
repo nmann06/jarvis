@@ -192,7 +192,8 @@ def draft(to, subject, body, reply_to_id="", in_reply_to="", references="", cc="
     onto one from elsewhere."""
     msg = EmailMessage()
     msg["From"] = config.ZOHO_USER
-    msg["To"] = to
+    if to:
+        msg["To"] = to
     if cc:
         msg["Cc"] = cc
     msg["Subject"] = subject

@@ -7,7 +7,8 @@ interview invitations and scheduling, offers, replies to their applications or c
 networking contacts about jobs. Automated mail (application received, job alerts, job boards,
 rejections) is left alone. For each one that does, DRAFT_MODEL writes a short reply in the
 owner's voice (STYLE), with the original quoted under it, saved in Zoho's Drafts (from their
-own-domain address, threaded onto the original even when it came to Gmail) and noted in
+own-domain address, threaded onto the original even when it came to Gmail, with the To and Cc
+boxes empty and the addresses written above the greeting for them to fill in) and noted in
 #jarvis. Nothing is ever sent. draft_email (jarvis/tools/gmail.py) uses STYLE too, via polish().
 
 Email is written by other people: the reply goes to the original's sender (its Reply-To, else
@@ -233,6 +234,13 @@ def reply_subject(subject):
     return subject if re.match(r"(?i)re:", subject) else f"Re: {subject}".strip()
 
 
+def addressed(to, cc, body):
+    """A draft's body with who it goes to written above the greeting. Drafts are saved with
+    the To and Cc boxes empty, so the owner fills them in from these lines before sending."""
+    lines = [f"To: {to}"] + ([f"Cc: {cc}"] if cc else [])
+    return "\n".join(lines) + "\n\n" + body
+
+
 def quote(headers, body):
     """The original, quoted under a reply the way mail apps do it."""
     when = headers.get("date", "")
@@ -272,9 +280,9 @@ def check(state, now):
             if not to:
                 log.info("job drafts: %s has no address to reply to", id)
                 continue
-            text = write(headers, body, now) + quote(headers, body)
+            text = addressed(to, cc, write(headers, body, now)) + quote(headers, body)
             subject = reply_subject(headers.get("subject"))
-            zoho.draft(to, subject, text, id if id.startswith(zoho.PREFIX) else "", cc=cc,
+            zoho.draft("", subject, text, id if id.startswith(zoho.PREFIX) else "",
                        in_reply_to=headers.get("message-id", ""),
                        references=headers.get("references", ""))
         except Exception:

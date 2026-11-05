@@ -4,6 +4,7 @@ and draft_email's replies.
 Usage: python -m unittest tests.test_job_drafts (Gmail, Zoho, the calendar and Claude are faked)
 """
 
+import base64
 import json
 import unittest
 from datetime import datetime
@@ -80,10 +81,11 @@ class JobDrafts(unittest.TestCase):
                                  "references": "<z@acme>"}, "When are you free?")
         self.run_check(state, inbox)
         self.draft.assert_called_once_with(
-            "jobs@acme.com", "Re: Internship interview",
+            "", "Re: Internship interview",
+            "To: jobs@acme.com\nCc: pat@acme.com, kim@acme.com\n\n"
             "Hi Sam,\n\nSounds good!\n\nThanks,\nMe\n\nOn Wed, Nov 4, 2026 at 9:05 AM, "
             "Sam Lee <sam@acme.com> wrote:\n> When are you free?\n",
-            "", cc="pat@acme.com, kim@acme.com", in_reply_to="<a@acme>", references="<z@acme>")
+            "", in_reply_to="<a@acme>", references="<z@acme>")
         self.run_check(state, inbox)  # nothing new: no second draft
         self.assertEqual(self.draft.call_count, 1)
 
@@ -94,7 +96,8 @@ class JobDrafts(unittest.TestCase):
                                            "message-id": "<b@acme>"}, "Offer attached")
         self.run_check(state, found(("zoho:INBOX:7", "zoho", "sam@acme.com", "RE: Offer")))
         args = self.draft.call_args
-        self.assertEqual(args.args[:2], ("sam@acme.com", "RE: Offer"))
+        self.assertEqual(args.args[:2], ("", "RE: Offer"))
+        self.assertTrue(args.args[2].startswith("To: sam@acme.com\n\nHi Sam,"))
         self.assertEqual(args.args[3], "zoho:INBOX:7")
 
     def test_no_reply_and_own_mail_skipped(self):
@@ -141,9 +144,34 @@ class DraftEmail(unittest.TestCase):
         with mock.patch.object(gmail.zoho, "draft") as draft:
             gmail.draft_email("", "Thanks!", "Hi Mike, thanks", "zoho:INBOX:30")
         draft.assert_called_once_with(
-            "mike@gf.com", "RE: Internship", "HI MIKE, THANKS\n\nMike <mike@gf.com> wrote:\n"
-            "> Happy to help.\n>\n> Mike\n", cc="ann@gf.com",
+            "", "RE: Internship", "To: mike@gf.com\nCc: ann@gf.com\n\nHI MIKE, THANKS\n\n"
+            "Mike <mike@gf.com> wrote:\n> Happy to help.\n>\n> Mike\n",
             in_reply_to=self.original[0]["message-id"], references="<r1@gf> <r2@gf>")
+
+    def test_gmail_reply_leaves_the_to_box_empty(self):
+        with mock.patch.object(gmail, "_gmail") as client:
+            api = client.return_value.users.return_value
+            api.messages.return_value.get.return_value.execute.return_value = {"threadId": "t1"}
+            gmail.draft_email("", "Thanks!", "Hi Mike, thanks", "g1", account="gmail")
+        message = api.drafts.return_value.create.call_args.kwargs["body"]["message"]
+        head, _, body = base64.urlsafe_b64decode(message["raw"]).decode().partition("\r\n\r\n")
+        self.assertEqual(message["threadId"], "t1")
+        names = [line.partition(":")[0] for line in head.split("\r\n")]
+        self.assertNotIn("To", names)
+        self.assertNotIn("Cc", names)
+        self.assertTrue(body.startswith("To: mike@gf.com\r\nCc: ann@gf.com\r\n\r\nHI MIKE, THANKS"))
+
+    def test_new_email_leaves_the_to_box_empty_too(self):
+        with mock.patch.object(gmail.zoho, "draft") as draft:
+            gmail.draft_email("sam@acme.com", "Hello", "Hi Sam", "")
+        self.assertEqual(draft.call_args.args[:3], ("", "Hello", "To: sam@acme.com\n\nHI SAM"))
+
+    def test_empty_to_leaves_the_header_out(self):
+        with mock.patch.object(zoho, "_connect") as connect:
+            connect.return_value.append.return_value = ("OK", [b""])
+            zoho.draft("", "Re: x", "hi")
+        raw = connect.return_value.append.call_args.args[3].decode()
+        self.assertNotIn("\r\nTo:", raw)
 
     def test_long_message_ids_stay_readable(self):
         with mock.patch.object(zoho, "_connect") as connect:

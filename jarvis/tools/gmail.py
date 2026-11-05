@@ -146,8 +146,9 @@ def read_email(id):
 
 @tool("Save an email draft in the owner's Gmail or Zoho for them to review and send. Can't send. "
       "A reply is threaded onto the email it answers, with that email quoted under it, and goes "
-      "to its sender, copying everyone else on it. The body is rewritten short and in the "
-      "owner's voice before it's saved.",
+      "to its sender, copying everyone else on it. The To and Cc boxes are left empty, with the "
+      "addresses written above the greeting for the owner to fill in. The body is rewritten "
+      "short and in the owner's voice before it's saved.",
       to={"type": "string", "description": "Recipient address(es), comma-separated. Empty for a "
           "reply: it goes to the sender, copying everyone else on the email"},
       subject={"type": "string", "description": "Ignored for a reply (it's Re: the original's)"},
@@ -171,20 +172,17 @@ def draft_email(to, subject, body, reply_to_id, account="zoho"):
             if not to:
                 return ("That email has no address to reply to (a no-reply sender, or the owner's "
                         "own), so no draft was saved. Give a to address to draft it anyway.")
-    body = job_drafts.polish(body, headers, original_body)
+    body = job_drafts.addressed(to, cc, job_drafts.polish(body, headers, original_body))
     if reply_to_id:
         body += job_drafts.quote(headers, original_body)
     msg_id = headers.get("message-id", "")
     if in_zoho:
-        zoho.draft(to, subject, body, cc=cc, in_reply_to=msg_id,
+        zoho.draft("", subject, body, in_reply_to=msg_id,
                    references=headers.get("references", ""))
         notify.record(f"✉️ Draft saved in Zoho to {to}: {subject}")
         return f"Draft saved to {to}: {subject}. It's in Zoho drafts for the owner to send."
     gmail = _gmail()
-    draft = EmailMessage()
-    draft["To"] = to
-    if cc:
-        draft["Cc"] = cc
+    draft = EmailMessage()  # no To: the addresses are in the body, for the owner to fill in
     draft["Subject"] = subject
     draft.set_content(body)
     message = {}
