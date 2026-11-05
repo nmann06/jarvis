@@ -227,6 +227,21 @@ def context(samples=None):
             else None}
 
 
+def snapshot(before=None):
+    """(context, little-endian int16 PCM bytes), what the snapshot command sends the panel, for
+    a report made inside Jarvis; None while the hooks aren't running. before: a time; wakes and
+    wake scores from then on are left out."""
+    if _started is None:
+        return None
+    samples = audio()
+    ctx = context(samples)
+    if before is not None:
+        ctx["wakes"] = [w for w in ctx["wakes"] if w["t"] < before]
+        ctx["wake_scores"] = [s for s in ctx["wake_scores"] if s["t"] < int(before)]
+        ctx["peak_wake_score"] = max((s["score"] for s in ctx["wake_scores"]), default=None)
+    return ctx, samples.astype("<i2").tobytes()
+
+
 def set_muted(on):
     global _muted
     _muted = bool(on)

@@ -143,6 +143,11 @@ Takes effect the moment the button is pressed. Saves `data/reports/<id>/meta.jso
 nothing to apply. A suggestion only ever changes a setting when the owner presses Apply; nothing
 changes by itself.
 
+The same reports can be made by voice (`jarvis.voice.report_request`): "Hey Jarvis, false wake",
+"missed wake", "you misheard me", "you didn't stop", "I didn't say stop", "wrong answer" and
+similar. Jarvis saves the report inside its own process, with what it heard as the note, says
+"Noted." and ends the conversation. A spoken `missed_wake` leaves out the wake that finally worked.
+
 - `GET /api/reports`: `{"reports": [...]}`, newest first.
 - `GET /api/reports/<id>/audio`: the WAV.
 - `POST /api/reports/<id>/apply`: applies the suggestion through `set_setting`, returns
