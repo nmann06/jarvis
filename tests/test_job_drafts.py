@@ -1,4 +1,5 @@
-"""Job email drafts (jarvis.job_drafts): which emails get a reply, where it goes, no repeats.
+"""Job email drafts (jarvis.job_drafts): which emails get a reply, where it goes, no repeats;
+and draft_email's replies.
 
 Usage: python -m unittest tests.test_job_drafts (Gmail, Zoho, the calendar and Claude are faked)
 """
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from jarvis import job_drafts
+from jarvis.tools import gmail, zoho
 from jarvis.tools.clock import TZ
 
 NOW = datetime(2026, 11, 4, 12, 0, tzinfo=TZ)
@@ -74,10 +76,13 @@ class JobDrafts(unittest.TestCase):
                                  "to": "Me <me@gmail.com>, Pat <pat@acme.com>",
                                  "cc": "jobs@acme.com, ME@school.ca, Kim <kim@acme.com>",
                                  "subject": "Internship interview", "message-id": "<a@acme>",
+                                 "date": "Wed, 04 Nov 2026 09:05:00 -0500",
                                  "references": "<z@acme>"}, "When are you free?")
         self.run_check(state, inbox)
         self.draft.assert_called_once_with(
-            "jobs@acme.com", "Re: Internship interview", "Hi Sam,\n\nSounds good!\n\nThanks,\nMe",
+            "jobs@acme.com", "Re: Internship interview",
+            "Hi Sam,\n\nSounds good!\n\nThanks,\nMe\n\nOn Wed, Nov 4, 2026 at 9:05 AM, "
+            "Sam Lee <sam@acme.com> wrote:\n> When are you free?\n",
             "", cc="pat@acme.com, kim@acme.com", in_reply_to="<a@acme>", references="<z@acme>")
         self.run_check(state, inbox)  # nothing new: no second draft
         self.assertEqual(self.draft.call_count, 1)
@@ -111,6 +116,47 @@ class JobDrafts(unittest.TestCase):
         with mock.patch.object(job_drafts.config, "JOB_DRAFTS", False):
             self.run_check(state, found(("g1", "gmail", "a@b.c", "x")))
         self.assertEqual(state, {})
+
+
+class DraftEmail(unittest.TestCase):
+    """draft_email (jarvis/tools/gmail.py): replies are threaded, quoted and addressed."""
+
+    def setUp(self):
+        for p in [mock.patch.object(job_drafts.config, "ZOHO_USER", "me@example.ca"),
+                  mock.patch.object(job_drafts, "_gmail_address", "me@gmail.com"),
+                  mock.patch.object(job_drafts.config, "OWNER_EMAILS", []),
+                  mock.patch.object(gmail.zoho, "enabled", return_value=True),
+                  mock.patch.object(gmail.notify, "record"),
+                  mock.patch.object(job_drafts, "polish", side_effect=lambda d, h, b: d.upper())]:
+            p.start()
+            self.addCleanup(p.stop)
+        self.original = ({"from": "Mike <mike@gf.com>", "to": "me@example.ca", "cc": "ann@gf.com",
+                          "subject": "RE: Internship", "message-id": "<" + "x" * 80 + "@outlook.com>",
+                          "references": "<r1@gf> <r2@gf>"}, "Happy to help.\n\nMike")
+        p = mock.patch.object(job_drafts, "original", return_value=self.original)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_zoho_reply_goes_to_the_sender_with_the_original_quoted(self):
+        with mock.patch.object(gmail.zoho, "draft") as draft:
+            gmail.draft_email("", "Thanks!", "Hi Mike, thanks", "zoho:INBOX:30")
+        draft.assert_called_once_with(
+            "mike@gf.com", "RE: Internship", "HI MIKE, THANKS\n\nMike <mike@gf.com> wrote:\n"
+            "> Happy to help.\n>\n> Mike\n", cc="ann@gf.com",
+            in_reply_to=self.original[0]["message-id"], references="<r1@gf> <r2@gf>")
+
+    def test_long_message_ids_stay_readable(self):
+        with mock.patch.object(zoho, "_connect") as connect:
+            connect.return_value.append.return_value = ("OK", [b""])
+            zoho.draft("a@b.c", "Re: x", "hi", in_reply_to=self.original[0]["message-id"],
+                       references="<r1@gf>")
+        raw = connect.return_value.append.call_args.args[3].decode()
+        self.assertIn(f"In-Reply-To: {self.original[0]['message-id']}\r\n", raw)
+        self.assertIn(f"References: <r1@gf> {self.original[0]['message-id']}\r\n", raw)
+
+    def test_reference_chain_is_trimmed(self):
+        chain = zoho.reference_chain(" ".join(f"<{i}@a>" for i in range(20)), "<new@a>").split()
+        self.assertEqual(chain, ["<0@a>"] + [f"<{i}@a>" for i in range(11, 20)] + ["<new@a>"])
 
 
 if __name__ == "__main__":

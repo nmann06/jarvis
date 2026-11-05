@@ -144,37 +144,58 @@ def read_email(id):
             f"Subject: {h.get('subject')}\n\n{body}")
 
 
-@tool("Save an email draft in the owner's Gmail or Zoho for them to review and send. Can't send.",
-      to={"type": "string", "description": "Recipient address(es), comma-separated"},
-      subject={"type": "string"},
-      body={"type": "string", "description": "Plain text body, signed as the owner"},
+@tool("Save an email draft in the owner's Gmail or Zoho for them to review and send. Can't send. "
+      "A reply is threaded onto the email it answers, with that email quoted under it, and goes "
+      "to its sender, copying everyone else on it. The body is rewritten short and in the "
+      "owner's voice before it's saved.",
+      to={"type": "string", "description": "Recipient address(es), comma-separated. Empty for a "
+          "reply: it goes to the sender, copying everyone else on the email"},
+      subject={"type": "string", "description": "Ignored for a reply (it's Re: the original's)"},
+      body={"type": "string", "description": "Plain text body, signed as the owner: what to say, "
+            "without addresses or a subject line"},
       reply_to_id={"type": "string", "description": "id of the email being answered, or empty"},
       account={"type": "string", "enum": ["gmail", "zoho"],
                "description": "Account it's sent from: a reply goes from the account the email "
                "came to; otherwise zoho (their own-domain address), unless the owner asks for Gmail"})
 def draft_email(to, subject, body, reply_to_id, account="zoho"):
-    if reply_to_id.startswith(zoho.PREFIX) or (account == "zoho" and not reply_to_id):
-        if not zoho.enabled():
-            return "Zoho isn't set up (README: Zoho setup), so no draft was saved."
-        zoho.draft(to, subject, body, reply_to_id)
+    from jarvis import job_drafts  # it imports this module; it has the email style and reply helpers
+    in_zoho = reply_to_id.startswith(zoho.PREFIX) or (account == "zoho" and not reply_to_id)
+    if in_zoho and not zoho.enabled():
+        return "Zoho isn't set up (README: Zoho setup), so no draft was saved."
+    headers, original_body, cc = {}, "", ""
+    if reply_to_id:
+        headers, original_body = job_drafts.original(reply_to_id)
+        subject = job_drafts.reply_subject(headers.get("subject"))
+        if not to.strip():
+            to, cc = job_drafts.recipients(headers)
+            if not to:
+                return ("That email has no address to reply to (a no-reply sender, or the owner's "
+                        "own), so no draft was saved. Give a to address to draft it anyway.")
+    body = job_drafts.polish(body, headers, original_body)
+    if reply_to_id:
+        body += job_drafts.quote(headers, original_body)
+    msg_id = headers.get("message-id", "")
+    if in_zoho:
+        zoho.draft(to, subject, body, cc=cc, in_reply_to=msg_id,
+                   references=headers.get("references", ""))
         notify.record(f"✉️ Draft saved in Zoho to {to}: {subject}")
         return f"Draft saved to {to}: {subject}. It's in Zoho drafts for the owner to send."
     gmail = _gmail()
     draft = EmailMessage()
     draft["To"] = to
+    if cc:
+        draft["Cc"] = cc
     draft["Subject"] = subject
     draft.set_content(body)
     message = {}
     if reply_to_id:
-        original = gmail.users().messages().get(
-            userId="me", id=reply_to_id, format="metadata",
-            metadataHeaders=["Message-ID", "References"]).execute()
-        h = _headers(original)
-        if msg_id := h.get("message-id"):
+        if msg_id:
             draft["In-Reply-To"] = msg_id
-            draft["References"] = f"{h.get('references', '')} {msg_id}".strip()
-        message["threadId"] = original["threadId"]
-    message["raw"] = base64.urlsafe_b64encode(draft.as_bytes()).decode()
+            draft["References"] = zoho.reference_chain(headers.get("references"), msg_id)
+        # Gmail threads a draft only with the original's thread id and the same subject (Re: is fine).
+        message["threadId"] = gmail.users().messages().get(
+            userId="me", id=reply_to_id, format="minimal").execute()["threadId"]
+    message["raw"] = base64.urlsafe_b64encode(draft.as_bytes(policy=zoho.UNFOLDED)).decode()
     gmail.users().drafts().create(userId="me", body={"message": message}).execute()
     notify.record(f"✉️ Draft saved in Gmail to {to}: {subject}")
     return f"Draft saved to {to}: {subject}. It's in Gmail drafts for the owner to send."

@@ -24,6 +24,9 @@ FOLDERS = {"inbox": "INBOX", "sent": "Sent", "drafts": "Drafts", "spam": "Spam",
 SNIPPET_MAX_BYTES = 300_000  # bigger messages (attachments) are listed without a snippet
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()  # IMAP's, not the locale's
 _FETCHED = re.compile(rb"UID (\d+)")
+# Drafts are written with headers unfolded: folding a long Message-ID (Outlook's are) turns it
+# into an encoded word, which mail apps can't match, so the reply wasn't threaded.
+UNFOLDED = email.policy.SMTP.clone(max_line_length=None)
 
 
 def enabled():
@@ -175,6 +178,14 @@ def read(id):
     return _parse(got[uid][1])
 
 
+def reference_chain(earlier, msg_id):
+    """A reply's References: the original's (its first and last few) and then its Message-ID."""
+    ids = (earlier or "").split()
+    if len(ids) > 10:
+        ids = ids[:1] + ids[-9:]
+    return " ".join(ids + [msg_id])
+
+
 def draft(to, subject, body, reply_to_id="", in_reply_to="", references="", cc=""):
     """Save a draft in Zoho's Drafts folder, from the owner's Zoho address. reply_to_id threads
     it onto a Zoho email; in_reply_to and references (the original's Message-ID and References)
@@ -191,16 +202,16 @@ def draft(to, subject, body, reply_to_id="", in_reply_to="", references="", cc="
         original = read(reply_to_id)
         if msg_id := _header(original, "message-id"):
             msg["In-Reply-To"] = msg_id
-            msg["References"] = f"{_header(original, 'references') or ''} {msg_id}".strip()
+            msg["References"] = reference_chain(_header(original, "references"), msg_id)
     elif in_reply_to:
         msg["In-Reply-To"] = in_reply_to
-        msg["References"] = f"{references} {in_reply_to}".strip()
+        msg["References"] = reference_chain(references, in_reply_to)
     msg.set_content(body)
     imap = _connect()
     try:
         status, data = imap.append(_quote(FOLDERS["drafts"]), r"(\Draft \Seen)",
                                    imaplib.Time2Internaldate(time.time()),
-                                   msg.as_bytes(policy=email.policy.SMTP))
+                                   msg.as_bytes(policy=UNFOLDED))
     finally:
         imap.logout()
     if status != "OK":
