@@ -178,7 +178,7 @@ def add(at, sound_name=None):
         _save(data)
     _wake.set()
     log.info("alarm %d set for %s (%s)", alarm["id"], alarm["at"], alarm["sound"])
-    return alarm
+    return dict(alarm, at=at)  # as alarms() gives them: "at" a datetime, not the saved text
 
 
 def remove(ids):

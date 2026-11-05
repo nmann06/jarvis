@@ -1,0 +1,71 @@
+name: Build Jarvis Panel
+
+# Builds the desktop app (app/) with PyInstaller on Windows and Linux. Run it by hand from the Actions
+# tab ("Run workflow"), or it runs when a push changes app/. Download the zip or tarball from the run's
+# Artifacts. No secrets are used or needed.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "app/**"
+      - ".github/workflows/build-panel.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            app/requirements.txt
+            app/requirements-build.txt
+
+      - name: Install Qt's system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libnss3 libasound2t64 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xkb1 libxdamage1 libxcomposite1 libxrandr2 libxtst6
+
+      - name: Install Python packages
+        run: python -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Build with PyInstaller
+        run: python -m PyInstaller --noconfirm --clean jarvis-panel.spec
+
+      - name: Check that the built app starts
+        run: dist/jarvis-panel/jarvis-panel --version
+        shell: bash
+
+      - name: Pack (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf jarvis-panel-linux.tar.gz -C dist jarvis-panel
+
+      - name: Pack (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/jarvis-panel -DestinationPath jarvis-panel-windows.zip
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-panel-${{ runner.os }}
+          path: |
+            app/jarvis-panel-linux.tar.gz
+            app/jarvis-panel-windows.zip
+          if-no-files-found: error

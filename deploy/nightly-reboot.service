@@ -1,0 +1,14 @@
+# hyde's nightly restart (root): restarts when deploy/nightly_reboot.py, run as the owner, says
+# every Jarvis window is idle and Jarvis has nothing on (exit 3: not now). Install, as root
+# (copied, not linked, so root never runs a unit file the owner's account can edit):
+#   sudo cp ~/jarvis/deploy/nightly-reboot.service ~/jarvis/deploy/nightly-reboot.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nightly-reboot.timer
+# What it decided each time: journalctl -u nightly-reboot
+[Unit]
+Description=Restart hyde at night when no Jarvis window is busy
+
+[Service]
+Type=oneshot
+Environment=HOME=/home/nate XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+ExecStart=/bin/sh -c '/usr/sbin/runuser -u nate -- /usr/bin/python3 -I /home/nate/jarvis/deploy/nightly_reboot.py check && /usr/bin/systemctl reboot'
+SuccessExitStatus=3

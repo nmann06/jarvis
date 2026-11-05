@@ -37,6 +37,8 @@ def main():
     alerts.start()  # e.g. "I'm finished in ...": spoken, or posted if voice is off
     from jarvis import alarms
     alarms.start()  # rings even with voice off; Discord can turn it off then
+    from jarvis.tools import timers
+    timers.restore()  # timers that were running before a restart
     from jarvis import mcp_server
     mcp_server.start()  # Claude sessions on any device, through Tailscale Funnel
     if config.VOICE_ENABLED:

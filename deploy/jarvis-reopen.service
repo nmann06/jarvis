@@ -1,0 +1,14 @@
+# At boot, reopens the tmux sessions and Jarvis windows saved by hyde's nightly restart
+# (deploy/nightly_reboot.py reopen; does nothing after any other restart). Linger is on, so it
+# runs without a login. Install:
+#   ln -s ~/jarvis/deploy/jarvis-reopen.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable jarvis-reopen
+[Unit]
+Description=Reopen the Jarvis windows saved by the nightly restart
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I %h/jarvis/deploy/nightly_reboot.py reopen
+
+[Install]
+WantedBy=default.target

@@ -4,8 +4,10 @@ mention, with a fake calendar and fake alarms.
 Usage: python -m unittest tests.test_alarm_events (sets no real alarm, switches no light)
 """
 
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 from datetime import date, datetime, timedelta
 from unittest import mock
 
@@ -156,6 +158,20 @@ class SettingAlarms(unittest.TestCase):
             finally:
                 gate.set()
         self.assertEqual(reply, "Alarm set for seven fifty five tomorrow.")
+
+
+class RealStore(unittest.TestCase):
+    """_set against the real alarm store (in a temporary file): the Fake above hands back
+    datetimes, so it missed add() returning the saved text and the voice loop crashing on it."""
+
+    def test_morning_alarm_through_add(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(alarms, "PATH", Path(tmp) / "alarms.json"), \
+                mock.patch("jarvis.tools.icloud_calendar.events", lambda start, end: []):
+            self.assertEqual(alarms._set(at(9, 30), None, NOW, "voice"), "Alarm set for nine thirty tomorrow.")
+            self.assertEqual(alarms._set(at(9, 30), None, NOW, "discord"),
+                             "You already have an alarm at 9:30 AM tomorrow, sir.")
+            self.assertEqual([a["at"] for a in alarms.alarms()], [at(9, 30)])
 
 
 class Goodnight(unittest.TestCase):

@@ -1,0 +1,10 @@
+# Every 15 minutes from 3:00 to 4:45; see nightly-reboot.service.
+[Unit]
+Description=Check at night whether hyde can restart
+
+[Timer]
+OnCalendar=*-*-* 03,04:00/15
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
