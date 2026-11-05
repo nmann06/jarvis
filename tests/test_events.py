@@ -448,6 +448,61 @@ class VoiceStillWorks(unittest.TestCase):
         self.assertTrue(voice.local_answer("What time is it?").startswith("It's "))
         self.assertTrue(voice.local_answer("What's the date?").startswith("It's "))
         self.assertIsNone(voice.local_answer("What time is my class?"))
+        self.assertTrue(voice.local_answer("Uptime.").endswith("for me, sir."))
+        self.assertIsNone(voice.local_answer("What is the uptime of my server at work?"))
+
+
+class SpokenReports(Hooks):
+    """"Hey Jarvis, false wake" and the rest: the Improve page's buttons, said aloud."""
+
+    def setUp(self):
+        super().setUp()
+        from jarvis.panel import reports
+        patcher = mock.patch.object(reports, "DATA", Path(self.tmp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_phrases(self):
+        said = {"False wake.": "false_wake", "Hey Jarvis, report a false wake": "false_wake",
+                "I didn't say Hey Jarvis.": "false_wake", "Missed wake.": "missed_wake",
+                "You misheard me.": "misheard", "You didn't stop.": "missed_stop",
+                "I said stop!": "missed_stop", "I didn't say stop.": "stopped_unprompted",
+                "Wrong answer.": "wrong_answer"}
+        for text, kind in said.items():
+            self.assertEqual(voice.report_request(text), kind, text)
+            self.assertFalse(voice.is_cancel(text), text)
+        for text in ("I said Hey Jarvis.", "That's wrong, it's Tuesday.", "Stop.",
+                     "Why did you stop the music?", "Cancel my alarm."):
+            self.assertIsNone(voice.report_request(text), text)
+
+    def test_missed_wake_leaves_out_the_wake_that_worked(self):
+        events.start()
+        for _ in range(20):
+            events.mic_block(tone())
+        now = time.time()
+        events._scores.extend([(now - 8, 0.35), (now - 0.5, 0.8)])  # the miss, then the wake
+        events.wake_fired(0.8)
+        with mock.patch.object(voice, "_woke_at", time.time()):
+            missed = voice.save_report("missed_wake", "Missed wake.")
+            false = voice.save_report("false_wake", "False wake.")
+        self.assertEqual(missed["context"]["peak_wake_score"], 0.35)
+        self.assertEqual(missed["context"]["wakes"], [])
+        self.assertEqual(missed["suggestion"]["key"], "WAKE_THRESHOLD")
+        self.assertTrue(missed["has_audio"])
+        self.assertEqual(missed["note"], 'Said to Jarvis: "Missed wake."')
+        self.assertEqual(false["suggestion"]["value"], "0.85")
+
+    def test_says_noted_and_ends_the_conversation(self):
+        utterance = mock.Mock(seconds=1.0)
+        utterance.transcribe.return_value = ("False wake.", 0.0, 0.0)
+        spoken = []
+        with mock.patch.object(voice, "_speak", lambda mic, texts, **kw: spoken.extend(texts)), \
+                mock.patch.object(voice, "save_report") as save, \
+                mock.patch.object(voice.alarms, "ringing", return_value=False):
+            answered = voice._answer(mock.Mock(), None, utterance, False, mock.Mock())
+        save.assert_called_once_with("false_wake", "False wake.")
+        self.assertEqual(spoken, ["Noted."])
+        self.assertIs(answered, False)
 
 
 if __name__ == "__main__":

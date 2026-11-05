@@ -15,6 +15,7 @@ import wave
 from datetime import datetime
 
 import numpy as np
+import psutil
 import sounddevice as sd
 
 from jarvis import (alarms, audio, config, events, extras, latency, learn, llm, notify, project,
@@ -106,6 +107,10 @@ _TIME = re.compile(_FILLER + r"(?:what time is it|what s the time|what is the ti
 _DATE = re.compile(_FILLER + r"(?:what s the date|what is the date|what s today s date|"
                    r"what is today s date|what day is it)"
                    r"(?: today)?(?: please| jarvis| sir)*")
+# "Hey Jarvis, uptime": how long hyde and Jarvis itself have been running.
+_UPTIME = re.compile(_FILLER + r"(?:(?:(?:what s|what is|tell me) (?:the |your )?)?up ?times?|"
+                     r"how long (?:have you|has hyde|has the computer) been (?:up|running|on)"
+                     r"(?: for)?)(?: please| jarvis| sir)*")
 _UNITS = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
           "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
           "eighteen", "nineteen"]
@@ -134,8 +139,28 @@ def clock_words(t):
     return f"{hour} {'oh ' if t.minute < 10 else ''}{_number(t.minute)}"
 
 
+def duration_words(seconds):
+    """A running time in its largest whole unit: "twenty three minutes", "an hour",
+    "twelve hours", "three days"."""
+    if seconds < 30:
+        return "under a minute"
+    if (minutes := round(seconds / 60)) < 60:
+        return "a minute" if minutes == 1 else f"{_number(minutes)} minutes"
+    if (hours := round(seconds / 3600)) < 48:
+        return "an hour" if hours == 1 else f"{_number(hours)} hours"
+    days = round(seconds / 86400)
+    return f"{_number(days) if days < 60 else days} days"
+
+
+def uptime_answer():
+    now = time.time()
+    hyde = duration_words(now - psutil.boot_time())
+    me = duration_words(now - psutil.Process().create_time())
+    return f"{hyde[0].upper()}{hyde[1:]} for Hyde and {me} for me, sir."
+
+
 def local_answer(text):
-    """The reply to a bare time or date question, or None for anything else."""
+    """The reply to a bare time, date or uptime question, or None for anything else."""
     words, now = _words(text), datetime.now(TZ)
     if _TIME.fullmatch(words):
         part = ("in the morning" if 5 <= now.hour < 12 else "in the afternoon" if 12 <= now.hour < 17
@@ -143,6 +168,8 @@ def local_answer(text):
         return f"It's {clock_words(now)} {part}."
     if _DATE.fullmatch(words):
         return f"It's {now:%A}, {now:%B} the {_ordinal(now.day)}."
+    if _UPTIME.fullmatch(words):
+        return uptime_answer()
     return None
 
 
@@ -185,6 +212,54 @@ def is_cancel(text, answering=False):
     so a bare "no" or "nothing" is the answer, not a cancel."""
     words = _words(text)
     return bool(_CANCEL.fullmatch(words) or (not answering and _DECLINE.fullmatch(words)))
+
+
+# The Improve page's report buttons, said aloud: "Hey Jarvis, false wake" saves the same report
+# (jarvis.panel.reports), says "Noted." and ends the conversation. Like never mind, the whole
+# utterance must match, so "that's wrong, it's Tuesday" still goes to Claude.
+_REPORT_START = r"(?:(?:report|log|record|note)(?: a| an| the| that)? )?"
+_REPORTS = {
+    "false_wake": r"false (?:wake|wake up|wakeup|wake word|start|trigger|positive|alarm)|"
+                  r"(?:i|we) (?:didn t|did not|never) say (?:hey )?jarvis|"
+                  r"(?:nobody|no one) said (?:hey )?jarvis|"
+                  r"(?:i|we) (?:didn t|did not) (?:call|wake|want) you|"
+                  r"nobody (?:called|woke) you|"
+                  r"you woke (?:up )?(?:by yourself|on your own|for no reason)",
+    "missed_wake": r"missed (?:wake|wake up|wake word)|you missed (?:my|the) (?:wake|wake word|"
+                   r"hey jarvis)|you didn t (?:wake|wake up|hear me) the first time|"
+                   r"i had to (?:say it|call you) twice",
+    "misheard": r"(?:you )?mis ?heard(?: me| that| it)?|mis ?hearing|you heard (?:me|that) wrong|"
+                r"that s not what i said|that isn t what i said|i didn t say that",
+    "missed_stop": r"missed (?:the )?stop|you missed (?:my|the) stop|you didn t stop|"
+                   r"you did not stop|why didn t you stop|i said stop|i told you to stop",
+    "stopped_unprompted": r"(?:i|we) (?:didn t|did not|never) say stop|"
+                          r"(?:nobody|no one) said stop|"
+                          r"why did you stop|you stopped (?:by yourself|on your own|for no reason)|"
+                          r"stopped unprompted",
+    "wrong_answer": r"wrong answer|(?:that was|that s) (?:the |a )?wrong answer|bad answer|"
+                    r"you got (?:that|it) wrong",
+}
+_REPORT_RES = {kind: re.compile(_CANCEL_FILLER + _REPORT_START + rf"(?:{phrases})" + _CANCEL_END)
+               for kind, phrases in _REPORTS.items()}
+# missed_wake: the wake that started this conversation and the score that led up to it aren't
+# the miss, so they're left out of the report. Scores climb for about this long before a wake.
+WAKE_LEAD_SECONDS = 1.5
+_woke_at = 0.0  # when the wake word (or "Hey Jarvis" over Jarvis) last started listening
+
+
+def report_request(text):
+    """The report kind text asks for ("false wake": "false_wake"), or None."""
+    words = _words(text)
+    return next((kind for kind, regex in _REPORT_RES.items() if regex.fullmatch(words)), None)
+
+
+def save_report(kind, text):
+    """Save a report as the panel's button does, with what Jarvis heard as its note."""
+    from jarvis.panel import reports
+    before = _woke_at - WAKE_LEAD_SECONDS if kind == "missed_wake" else None
+    report = reports.create(kind, f'Said to Jarvis: "{text}"', events.snapshot(before))
+    log.info("report %s saved by voice", report["id"])
+    return report
 
 
 # "Hey Jarvis, ..." or "Jarvis, ..." in the follow-up window is plainly meant for Jarvis, so
@@ -584,6 +659,19 @@ def _answer(mic, brain, utterance, follow_up, turn):
         alarms.drop_pending("voice")  # "Which one?" asked about cancelling alarms
         turn.outcome = "cancelled"
         return False
+    if not alarms.ringing() and (kind := report_request(text)) is not None:
+        try:
+            save_report(kind, text)
+            reply = "Noted."
+        except Exception:
+            log.exception("couldn't save a %s report", kind)
+            reply = "I couldn't save that report, sir."
+        _texting = _awaiting_please = None
+        with _speaker:
+            _speak(mic, [reply], timing=turn)
+        mic.clear()
+        turn.reply, turn.outcome = reply, f"reported {kind}"
+        return False  # the end chime, as for never mind
     note = None  # for Claude, this turn only
     if _texting:
         to, _texting = _texting, None
@@ -905,6 +993,7 @@ def _sir(mic):
 def _converse(mic, brain, utterance):
     """Answer utterance, then follow-ups without the wake word until nothing more is said,
     then the end chime."""
+    global _woke_at
     if utterance is None:
         log.info("no request after the wake word")
     follow_up = False
@@ -913,10 +1002,12 @@ def _converse(mic, brain, utterance):
     while utterance is not None:
         answered = handle(mic, brain, utterance, follow_up)
         if answered == WOKEN:  # just "Hey Jarvis" again: chime and listen, as for a wake
+            _woke_at = time.time()
             play(CHIME)
             utterance, follow_up = audio.record_utterance(mic, stt.transcribe), False
             continue
         if answered == BARGED_IN:  # "Hey Jarvis" over the reply: "Sir?" and listen
+            _woke_at = time.time()
             utterance, follow_up = _sir(mic), False
             continue
         if not answered:
@@ -931,13 +1022,15 @@ def _converse(mic, brain, utterance):
 
 def _barged_in(mic, brain):
     """ "Hey Jarvis" over something said between conversations: a conversation, from "Sir?"."""
+    global _woke_at
+    _woke_at = time.time()
     spotify.duck(True)
     threading.Thread(target=brain.prewarm, name="prewarm", daemon=True).start()
     _converse(mic, brain, _sir(mic))
 
 
 def run():
-    global _wake
+    global _wake, _woke_at
     wake, brain = WakeWord(), llm.Brain("voice")
     _wake = wake
     tools.warm_up()
@@ -993,6 +1086,7 @@ def run():
                 events.wake_ignored("during an alert")
                 continue
             log.info("wake (score %.2f)", score)
+            _woke_at = time.time()
             events.set_state("listening")
             spotify.duck(True)  # music on Jarvis's speaker turned down until the end chime
             # While the owner talks, get Claude's cache ready for the conversation so far.

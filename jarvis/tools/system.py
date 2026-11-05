@@ -32,4 +32,5 @@ def system_status():
         "memory": f"{mem.used / 2**30:.1f} of {mem.total / 2**30:.1f} GB used",
         "disk": f"{disk.free / 2**30:.0f} GB free of {disk.total / 2**30:.0f} GB",
         "uptime": f"{up // 86400} days {up % 86400 // 3600} hours {up % 3600 // 60} minutes",
+        "jarvis_uptime": f"{int(time.time() - psutil.Process().create_time()) // 60} minutes",
     }
