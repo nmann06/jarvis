@@ -12,7 +12,7 @@ $JarvisWindow = Join-Path $env:LOCALAPPDATA 'Jarvis'
 
 function jarvis {
     $window = '-c', '--continue', '-r', '--resume', '-p', '--prompt', '--model', '--effort', '--mode', '--plain',
-              '--thinking', '--log', '-h', '--help'
+              '--thinking', '--log', '--colour', '--color', '--compact', '-h', '--help'
     if ($args.Count -and $args[0] -eq '--update') { Update-JarvisWindow; return }
     if ($args.Count -and $args[0] -eq '--hyde') {
         # -t gives the window a terminal; each option is single-quoted for hyde's shell.

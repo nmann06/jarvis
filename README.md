@@ -392,6 +392,15 @@ Jarvis to apply them. On the Windows laptop it reaches hyde over ssh (`JARVIS_HY
 screen, are copied to the clipboard with a note in the footer. `/btw` asks a side question
 about the conversation without adding to it, as in Claude Code.
 
+`/colour` (or `/colour red`) turns the whole window another colour: blue, cyan, teal, green,
+yellow, orange, red, pink, purple or grey, saved for new windows too; errors, diffs and warnings
+keep their red, green and amber. `jarvis --colour NAME` opens one window in a colour without
+saving it, `jarvis --compact` puts a one-line J.A.R.V.I.S. on top instead of the big letters,
+and `jarvis-grey` is both: grey and compact. `/rename` renames the conversation and the terminal
+tab's title with it. Outside `/manager`, Jarvis turns project manager mode on by itself when a
+task would clearly go faster split among threads (`/manager auto off` stops that, `/manager
+auto on` brings it back).
+
 It lives in its own repo, [jarvis-wrapper](https://github.com/nmann06/jarvis-wrapper), cloned
 to `~/jarvis-wrapper` on hyde (its README has the setup and tests).
 

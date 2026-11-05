@@ -3,11 +3,12 @@
     jarvis                                     the Jarvis window (Claude Code, in blue, auto mode)
     jarvis -c                                  the window, continuing the last conversation here
     jarvis --mode default                      the window, asking before each tool as usual
+    jarvis-grey                                the window in grey, without the big JARVIS letters
     jarvis what quizzes do I have next week    ask Jarvis something
     jarvis "what's on tomorrow?" -a
 
 With nothing after it (or with the window's options: `-c`, `-r` to pick a conversation,
-`--model`, `--plain`, `-p "first prompt"`, `--help`), `jarvis` opens the Jarvis window: Claude
+`--model`, `--plain`, `--colour red`, `--compact`, `-p "first prompt"`, `--help`), `jarvis` opens the Jarvis window: Claude
 Code with a screen of its own, answering as Jarvis, in auto mode. It opens in the current folder
 (on the Windows laptop, once step 3 below is done; `jarvis --hyde` opens it in your home folder
 on hyde). See "The Jarvis window" in the README.
