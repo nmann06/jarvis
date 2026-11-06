@@ -30,6 +30,8 @@ OVER_SCORE = 0.05
 QUIET_MIC = 0.02  # a loudest sample under this in 30 s is a mic hearing almost nothing
 RECENT_SECONDS = 120  # how far back a wake or a stop can be what the button is about
 LAST_TURN_SECONDS = 300
+RECENT_TURNS = 5  # how many earlier voice turns a report keeps
+RECENT_TURNS_SECONDS = 900  # and how far back they can be
 MAX_UTTERANCE_LIMIT = 30.0
 SMALL_WHISPER = ("medium.en", "small.en", "base.en", "tiny.en")
 BIG_WHISPER = "large-v3-turbo"
@@ -90,23 +92,32 @@ def _threshold_now():
         return float(settings.BY_KEY["WAKE_THRESHOLD"]["default"])
 
 
-def _last_line(path, wanted=lambda row: True):
-    """The last JSON row of a log wanted() likes, looking only at the end of the file."""
+def _last_lines(path, count, wanted=lambda row: True):
+    """The last count JSON rows of a log wanted() likes, newest first, looking only at the end
+    of the file."""
     try:
         with open(path, "rb") as f:
             f.seek(0, os.SEEK_END)
             f.seek(max(0, f.tell() - 262144))
             lines = f.read().splitlines()
     except OSError:
-        return None
+        return []
+    rows = []
     for line in reversed(lines):
         try:
             row = json.loads(line)
         except ValueError:
             continue  # the first line, cut in half by the seek
         if isinstance(row, dict) and wanted(row):
-            return row
-    return None
+            rows.append(row)
+            if len(rows) == count:
+                break
+    return rows
+
+
+def _last_line(path, wanted=lambda row: True):
+    """The last JSON row of a log wanted() likes, or None."""
+    return next(iter(_last_lines(path, 1, wanted)), None)
 
 
 def _age(stamp, now):
@@ -117,8 +128,9 @@ def _age(stamp, now):
         return None
 
 
-def build_context(hooks, now):
-    """A report's context, from jarvis.events.context() (None: the hooks weren't live)."""
+def build_context(hooks, now, prompt=None):
+    """A report's context, from jarvis.events.context() (None: the hooks weren't live). prompt:
+    what the owner said to make a spoken report."""
     hooks = hooks or {}
     live = bool(hooks)
     threshold = hooks.get("threshold")
@@ -129,7 +141,7 @@ def build_context(hooks, now):
                "mic_peak": hooks.get("mic_peak"), "muted": hooks.get("muted", False),
                "last_exchange": _last_line(DATA / "exchanges.jsonl",
                                            lambda row: row.get("channel") == "voice") or {},
-               "last_turn": _last_turn(now)}
+               "last_turn": _last_turn(now), "prompt": prompt, "turns": _recent_turns(now)}
     if not live:
         context["note"] = NOT_LIVE
     return _masked(context)
@@ -141,6 +153,15 @@ def _last_turn(now):
         return {}
     keys = ("time", "heard", "reply", "outcome", "endpoint", "audio_s", "follow_up", "total_s")
     return {**{k: row.get(k) for k in keys}, "age_s": _age(row.get("time"), now)}
+
+
+def _recent_turns(now):
+    """The voice turns before the report, oldest first: what was heard and what Jarvis said."""
+    keys = ("time", "heard", "reply", "outcome")
+    turns = [{**{k: row.get(k) for k in keys}, "age_s": _age(row.get("time"), now)}
+             for row in _last_lines(DATA / "latency.jsonl", RECENT_TURNS)]
+    return [t for t in reversed(turns)
+            if t["age_s"] is not None and t["age_s"] <= RECENT_TURNS_SECONDS]
 
 
 # Suggestions
@@ -363,11 +384,12 @@ def _write(path, report):
     os.replace(tmp, path / "meta.json")
 
 
-def create(kind, note, snapshot):
-    """Save a report, with snapshot from the hooks: (context, PCM bytes), or None if not live."""
+def create(kind, note, snapshot, prompt=None):
+    """Save a report, with snapshot from the hooks: (context, PCM bytes), or None if not live.
+    prompt: what the owner said, for a report made by voice."""
     now = time.time()
     hooks, pcm = snapshot or (None, b"")
-    ctx = build_context(hooks, now)
+    ctx = build_context(hooks, now, prompt)
     path = _new_dir(kind, now)
     if pcm:
         fd = os.open(path / "audio.wav", os.O_WRONLY | os.O_CREAT, 0o600)

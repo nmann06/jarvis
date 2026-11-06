@@ -121,7 +121,10 @@ def make_report(kind, t, idx, note="", audio=True, status="open"):
     return {"id": f"{stamp}-{idx}-{kind}", "kind": kind, "t": t, "note": note, "has_audio": audio,
             "context": {"peak_wake_score": 0.31, "threshold": 0.5,
                         "states": [{"state": "idle", "t": t - 3}, {"state": "listening", "t": t - 1.2}],
-                        "stop_events": [], "last_exchange": {"user": "what's the weather <b>like</b>", "jarvis": "It is 4 degrees."}},
+                        "stop_events": [], "last_exchange": {"heard": "what's the weather <b>like</b>", "reply": "It is 4 degrees."},
+                        "turns": [{"time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t - 40)), "heard": "what's the weather <b>like</b>",
+                                   "reply": "It is 4 degrees.", "outcome": "answered", "age_s": 40}],
+                        "prompt": "false wake" if kind == "false_wake" else None},
             "suggestion": sug, "status": status}
 
 

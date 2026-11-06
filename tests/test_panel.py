@@ -15,6 +15,7 @@ import time
 import types
 import unittest
 import wave
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -684,6 +685,19 @@ class Reports(Panel):
                              (1, 2, 16000, 10 * events.BLOCK))
         self.assertEqual(stat.S_IMODE((folder / "meta.json").stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE((folder / "audio.wav").stat().st_mode), 0o600)
+
+    async def test_recent_turns_oldest_first(self):
+        def row(ago, heard):
+            stamp = datetime.fromtimestamp(time.time() - ago).isoformat(timespec="seconds")
+            return {"time": stamp, "heard": heard, "reply": f"re {heard}", "outcome": "answered",
+                    "audio_s": 1.0}
+        rows = [row(1800, "too old")] + [row(60 * (7 - i), f"turn {i}") for i in range(7)]
+        (self.dir / "latency.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        context = (await self.press("false_wake"))["context"]
+        self.assertEqual([t["heard"] for t in context["turns"]],
+                         ["turn 2", "turn 3", "turn 4", "turn 5", "turn 6"])
+        self.assertEqual(set(context["turns"][0]), {"time", "heard", "reply", "outcome", "age_s"})
+        self.assertIsNone(context["prompt"])
 
     async def test_hooks_not_live(self):
         for kind in reports.KINDS:

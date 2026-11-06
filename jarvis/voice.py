@@ -257,7 +257,7 @@ def save_report(kind, text):
     """Save a report as the panel's button does, with what Jarvis heard as its note."""
     from jarvis.panel import reports
     before = _woke_at - WAKE_LEAD_SECONDS if kind == "missed_wake" else None
-    report = reports.create(kind, f'Said to Jarvis: "{text}"', events.snapshot(before))
+    report = reports.create(kind, f'Said to Jarvis: "{text}"', events.snapshot(before), text)
     log.info("report %s saved by voice", report["id"])
     return report
 

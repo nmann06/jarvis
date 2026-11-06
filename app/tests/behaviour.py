@@ -195,6 +195,11 @@ def main():
             page.wait_for_timeout(300)
             check("status change", page.locator(".report").first.get_attribute("class").endswith("status-dismissed"))
             check("audio player present", page.locator("audio").count() >= 1)
+            card = page.locator(".report", has_text="TV was on").first
+            card.locator("summary").click()
+            ctx_text = card.locator(".ctx").inner_text()
+            check("report shows earlier turns and the spoken prompt", "It is 4 degrees." in ctx_text
+                  and "Report said" in ctx_text and "false wake" in ctx_text, ctx_text)
             check("untrusted exchange text shown as text", scripts_ran == [])
 
             print("settings")

@@ -491,6 +491,7 @@ class SpokenReports(Hooks):
         self.assertTrue(missed["has_audio"])
         self.assertEqual(missed["note"], 'Said to Jarvis: "Missed wake."')
         self.assertEqual(false["suggestion"]["value"], "0.85")
+        self.assertEqual(false["context"]["prompt"], "False wake.")
 
     def test_says_noted_and_ends_the_conversation(self):
         utterance = mock.Mock(seconds=1.0)

@@ -111,9 +111,16 @@ export function mount(root, { store }) {
     if (ctx.peak_wake_score != null) bits.push(["Peak wake score", `${ctx.peak_wake_score} (needs ${ctx.threshold ?? "?"})`]);
     if (ctx.states && ctx.states.length) bits.push(["States", ctx.states.map((s) => `${s.state}${s.t ? ` @ ${new Date(s.t * 1000).toLocaleTimeString()}` : ""}`).join(" → ")]);
     if (ctx.stop_events && ctx.stop_events.length) bits.push(["Stop checks", ctx.stop_events.map((e) => JSON.stringify(e)).join("; ")]);
+    const turns = ctx.turns || [];
+    for (const t of turns) {
+      const at = t.time ? ` @ ${new Date(t.time).toLocaleTimeString()}` : "";
+      bits.push([`You said${at}`, t.heard || "(nothing heard)"]);
+      bits.push(["Jarvis", t.reply || t.outcome || "(no reply)"]);
+    }
     const ex = ctx.last_exchange || {};
-    if (ex.user) bits.push(["You said", ex.user]);
-    if (ex.jarvis) bits.push(["Jarvis said", ex.jarvis]);
+    if (!turns.length && ex.heard) bits.push(["You said", ex.heard]);
+    if (!turns.length && (ex.said || ex.reply)) bits.push(["Jarvis said", ex.said || ex.reply]);
+    if (ctx.prompt) bits.push(["Report said", ctx.prompt]);
     if (!bits.length) bits.push(["", "No context was recorded."]);
     det.append(h("dl", {}, ...bits.flatMap(([k, v]) => k ? [h("dt", { text: k }), h("dd", { text: v })] : [h("dd", { class: "wide", text: v })])));
     card.append(det);

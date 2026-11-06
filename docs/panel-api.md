@@ -128,12 +128,17 @@ blue, `thinking` is a slow amber pulse, `idle` is off, `unknown` is grey with a 
 
 Takes effect the moment the button is pressed. Saves `data/reports/<id>/meta.json`, plus
 `audio.wav` when the hooks are live. Returns the report. Recent context comes from the voice hooks
-(last wake scores, stop-detection results, state changes) and `data/exchanges.jsonl`.
+(last wake scores, stop-detection results, state changes), `data/exchanges.jsonl` and
+`data/latency.jsonl`. `turns` holds up to the last 5 voice turns from the 15 minutes before the
+report, oldest first (what was heard, Jarvis's reply, the outcome). `prompt` is what the owner said
+for a spoken report, and null for a button press.
 
 ```json
 {"id": "20261101-071502-missed_wake", "kind": "missed_wake", "t": 1793500000.0, "note": "",
  "has_audio": true, "context": {"peak_wake_score": 0.31, "threshold": 0.5,
- "states": [], "stop_events": [], "last_exchange": {}},
+ "states": [], "stop_events": [], "last_exchange": {},
+ "turns": [{"time": "2026-11-01T07:14:58", "heard": "what's the weather", "reply": "Four degrees.",
+            "outcome": "answered", "age_s": 4.0}], "prompt": null},
  "suggestion": {"text": "Your wake word scored 0.31 and needs 0.5. Lower sensitivity to 0.28?",
                 "key": "WAKE_THRESHOLD", "value": "0.28"},
  "status": "open"}
